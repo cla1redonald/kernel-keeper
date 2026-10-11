@@ -12,7 +12,7 @@ jobs:
         with: { node-version: 22 }
       - name: build kernel-keeper
         run: |
-          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper-public "$RUNNER_TEMP/kernel-keeper"
+          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper "$RUNNER_TEMP/kernel-keeper"
           npm ci --prefix "$RUNNER_TEMP/kernel-keeper"
           npm run build --prefix "$RUNNER_TEMP/kernel-keeper"
       - id: patrol

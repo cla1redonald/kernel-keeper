@@ -1,8 +1,19 @@
 # Kernel Keeper
 
-Once agents read your docs on every task, a stale page stops being clutter and becomes wrong behaviour. Kernel Keeper patrols a team's markdown memory, and the skills and agents that act on it, for the rot that misleads them: dangling links, missing owners, stale pages, invisible agents, broken supersession.
+Teams now hand AI agents their internal documents and tell them to follow them. When a page is out of date, has no owner, or quietly contradicts another, the agent acts on it and gets things wrong, and nobody notices. Kernel Keeper checks those documents on a schedule and lists what has gone stale. It drafts a fix for each problem, but a named person has to approve it before anything is changed. You can run it in two minutes with no API key.
 
-It automates the clerk and never the judge. AI drafts the fix, a named human elects it, and a deterministic clerk applies only what it can prove, with an audit trail. Which definition counts is an authority problem, not a knowledge problem, so that signature stays human.
+The tool finds problems and drafts fixes. A named person approves each fix before anything changes. A deterministic step then applies only what it can prove is safe, and records it in an audit trail.
+
+## The words this README uses
+
+- **Register:** a folder of authored files that agents rely on. Either a *knowledge bundle* (linked markdown pages) or a *procedure estate* (the skills, agents and commands that tell agents how to act).
+- **Patrol:** the deterministic checks over a register. No AI, no key.
+- **Proposal:** a drafted fix, saved as a file next to the register, never inside it.
+- **Elect:** a named person approves a proposal. Until then nothing is applied.
+- **Scribe:** the AI role that drafts a proposal for each patrol finding.
+- **Clerk:** the step that applies elected proposals. It is plain code, previews first, and refuses anything stale or ambiguous.
+- **Glass:** a local web page for reviewing proposals and approving them without Markdown, Git or the command line.
+- **Damage Meter:** `verify`, which compares a register with a snapshot taken before a change and reports what went missing.
 
 ## The loop
 
@@ -17,20 +28,30 @@ flowchart LR
   U --> M
 ```
 
-The patrol is deterministic and needs no key. AI only appears after it, to draft proposals, and a proposal cannot enter the register until a human elects it.
+The patrol is deterministic and needs no key. AI only appears after it, to draft proposals, and a proposal cannot enter the register until a named person elects it.
 
 ## Quickstart (no API key)
 
 Needs Node 22 or later.
 
-```bash
-git clone https://github.com/cla1redonald/kernel-keeper-public && cd kernel-keeper-public
-npm ci && npm run build
-node dist/cli.js tests/fixtures/northwind-memory-lab/bundle --memory
-node dist/cli.js glass-demo
-```
+1. **Clone.**
+   ```bash
+   git clone https://github.com/cla1redonald/kernel-keeper && cd kernel-keeper
+   ```
+2. **Build.**
+   ```bash
+   npm ci && npm run build
+   ```
+3. **Run the patrol** on the bundled Northwind fixture, with the wiki-memory checks on.
+   ```bash
+   node dist/cli.js tests/fixtures/northwind-memory-lab/bundle --memory
+   ```
+4. **Open the review console** on a throwaway copy of the fixture.
+   ```bash
+   node dist/cli.js glass-demo
+   ```
 
-The third command patrols the bundled Northwind fixture with the wiki-memory checks on. It exits `1` because it has a medium finding. Real output from running it on 2026-10-11:
+Step 3 exits `1` because it has a medium finding. Real output from running it on 2026-10-11:
 
 ```markdown
 # Patrol report: bundle
@@ -53,7 +74,7 @@ The third command patrols the bundled Northwind fixture with the wiki-memory che
 *The keeper reports and proposes; it never edits. Owners affirm or amend; the judgment stays human.*
 ```
 
-The fourth command copies the fixture to a temp folder and opens Glass, the local review console, with a drafted proposal waiting. Approve it, apply it, and read the audit history. The walkthrough is in [docs/demo/glass-demo-script.md](docs/demo/glass-demo-script.md).
+Step 4 copies the fixture to a temp folder and opens Glass, the local review console, with a drafted proposal waiting. Approve it, apply it, and read the audit history. The walkthrough is in [docs/demo/glass-demo-script.md](docs/demo/glass-demo-script.md).
 
 ### With an API key
 
@@ -79,15 +100,16 @@ Exit codes: `0` clean, `1` findings at or above `--fail-on` (default `med`), `2`
 | Memory mode (`--memory`) | Weak index lines, missing claim receipts, undeclared generated caches, archive and compartment leaks | MED/HIGH |
 | Procedure estate (`--register`) | Agents invisible to the registry, skills without `SKILL.md`, retired tool names, name collisions, dangling paths | HIGH/MED/LOW |
 
-Skills and agents under `plugins/` are treated as rented, so they get shape checks only. Every check, its severities and the exit codes are in [docs/checks.md](docs/checks.md).
+Third-party plugins get shape checks only. Every check, its severities and the exit codes are in [docs/checks.md](docs/checks.md).
 
-## How I know it works
+## What is tested
 
-- **293 tests in 19 files.** With the build in place and no API keys set, 287 run and 6 skip. The 6 patrol the real Northwind Money bundle from the companion repo and run when `TEAM_OS_PATH` points at a checkout. CI clones it, so all 293 run there.
+- **332 tests in 22 files.** With the build in place and no API keys set, 326 run and 6 skip. The 6 patrol the real Northwind Money bundle from the companion repo and run when `TEAM_OS_PATH` points at a checkout. CI clones it, so all 332 run there.
 - **Fault-seeded fixtures.** `tests/fixtures/governance-repo`, `mini-repo` and `estate` are built with known faults (dangling links, duplicate IDs, a superseded item with no replacement, an agent with no frontmatter) and the tests pin the exact findings the patrol must report, and no others. Verify tests plant damage after a baseline and assert it is caught.
 - **Prompts are inspectable before anything is spent.** `propose --dry-run` prints the exact prompts and makes zero API calls. Every proposal records a reproducible `prompt-sha256`, the evidence files and the reviewed-surface hashes, so `apply` refuses a proposal whose target has changed since it was drafted.
 - **Cost is visible and capped.** `propose` and `drift` print an input-token estimate before the first call. `mine` takes `--max-calls` (default 25) and aborts before spending if the run would need more.
-- **Repository content is treated as hostile.** Fence delimiters inside notes are escaped, prompts mark content as data, and the worst a poisoned note can do is produce a proposal that a human then declines.
+- **Hostile content is contained in code, not only in the prompt.** Fenced content is treated as data, with delimiter escaping, and the validator and apply plan refuse out-of-root targets and restore `needs-human`. See `tests/ai-injection.test.ts`, where a stubbed model obeys an injected instruction and is refused.
+- **The review console is locked to one source.** It checks Host and Origin, requires a per-session token on every POST, and records the reviewer you name. See `tests/glass-security.test.ts`.
 
 ## Where things live
 
@@ -101,11 +123,12 @@ Skills and agents under `plugins/` are treated as rented, so they get shape chec
 
 ## Companion
 
-[Team OS](https://github.com/cla1redonald/team-os) is the shared-context pattern this patrols: plain markdown, no vector store, owners and dates on every page. Its Northwind Money bundle is the worked example, and Kernel Keeper's first run on it found a metric definition no concept referenced, a runbook missing from the index and three data sources with no owner.
+[Team OS](https://github.com/cla1redonald/team-os) is the shared-context pattern this patrols: plain markdown, no vector store, owners and dates on every page. Its Northwind Money bundle is the worked example, and the integration tests patrol it on every CI run.
 
 ## Boundaries
 
 - It never edits your register on its own. Apply is a dry run until you pass `--write`, and it refuses anything not elected, stale or ambiguous.
+- Glass serves only the source it was started with, on this machine only, and signs elections with the reviewer you name.
 - It does not decide what is true. It cannot tell you which of two conflicting definitions is right, only that they conflict.
 - It does not follow symlinks, patrol third-party plugin content beyond shape checks, or run a shell. The only commands it executes are the ones you pass to `verify --generator`, and those run without one.
 - It is not a retrieval product. There are no embeddings and no vector store.

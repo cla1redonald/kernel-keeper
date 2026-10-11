@@ -4,12 +4,15 @@ import type { RegisterMode } from "../types.js";
 const USAGE = `kernel-keeper glass <bundle-or-estate-root> [options]
 
 Start the local Kernel Keeper Glass review console. The console binds to
-127.0.0.1 by default and calls the same deterministic engine as the CLI.
+loopback (127.0.0.1 by default), serves only the source it was started with,
+and calls the same deterministic engine as the CLI.
 
 Options:
   --register <kind>  Treat input as procedure register: estate | skills | agents | commands
   --memory           Bundle mode: opt into wiki-memory checks
   --proposals <dir>  Load drafted proposal files into the browser inbox
+  --by <name>        Reviewer recorded in the audit trail (default: KERNEL_KEEPER_REVIEWER,
+                     then git user.name, then "reviewer")
   --host <host>      Host to bind (default 127.0.0.1)
   --port <n>         Port to bind (default 8787; use 0 for an ephemeral port)
   -h, --help         Show this help
@@ -25,6 +28,7 @@ interface Args {
   host: string;
   port: number;
   proposalsDir?: string;
+  by?: string;
 }
 
 function usageError(message: string): never {
@@ -55,6 +59,12 @@ function parseArgs(argv: string[]): Args {
         const v = argv[++i];
         if (!v || v.startsWith("-")) usageError("--proposals requires a directory path");
         args.proposalsDir = v;
+        break;
+      }
+      case "--by": {
+        const v = argv[++i];
+        if (!v || v.startsWith("-")) usageError("--by requires a name");
+        args.by = v;
         break;
       }
       case "--host": {
@@ -90,6 +100,7 @@ export async function glassMain(argv: string[]): Promise<void> {
       host: args.host,
       port: args.port,
       ...(args.proposalsDir ? { proposalsDir: args.proposalsDir } : {}),
+      ...(args.by ? { reviewer: args.by } : {}),
     });
     console.log(`glass: ${started.url}`);
   } catch (err) {

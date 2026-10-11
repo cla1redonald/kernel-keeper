@@ -53,7 +53,7 @@ function setElectionCheckbox(content: string, elected: boolean): string {
 }
 
 function lineText(value: string | undefined, fallback: string): string {
-  const cleaned = value?.replace(/\s+/g, " ").replace(/\]/g, ")").trim();
+  const cleaned = value?.replace(/\s+/g, " ").replace(/\[/g, "(").replace(/\]/g, ")").trim();
   return cleaned || fallback;
 }
 

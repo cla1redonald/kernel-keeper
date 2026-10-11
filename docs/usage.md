@@ -3,7 +3,7 @@
 Everything here assumes a local build:
 
 ```bash
-git clone https://github.com/cla1redonald/kernel-keeper-public && cd kernel-keeper-public
+git clone https://github.com/cla1redonald/kernel-keeper && cd kernel-keeper
 npm ci && npm run build
 ```
 
@@ -45,7 +45,7 @@ jobs:
         with: { node-version: 22 }
       - name: build kernel-keeper
         run: |
-          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper-public "$RUNNER_TEMP/kernel-keeper"
+          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper "$RUNNER_TEMP/kernel-keeper"
           npm ci --prefix "$RUNNER_TEMP/kernel-keeper"
           npm run build --prefix "$RUNNER_TEMP/kernel-keeper"
       - run: node "$RUNNER_TEMP/kernel-keeper/dist/cli.js" . --out patrol-report.md --fail-on high

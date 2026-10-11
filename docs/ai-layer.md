@@ -13,7 +13,7 @@ node dist/cli.js mine <notes-dir> --bundle <bundle> --out-dir proposals/ # the G
 node dist/cli.js drift <bundle-or-estate> --out-dir proposals/           # the Drift Reviewer
 node dist/cli.js apply <bundle-or-estate> --proposals proposals/         # the Clerk (dry-run by default; --write applies)
 node dist/cli.js verify <bundle-or-estate> --baseline baseline.json      # the Damage Meter
-node dist/cli.js glass <bundle-or-estate> --proposals proposals/         # the Glass review console
+node dist/cli.js glass <bundle-or-estate> --proposals proposals/ --by "Your Name" # the Glass review console
 node dist/cli.js glass-demo                                              # seeded Glass demo
 ```
 
@@ -26,6 +26,17 @@ node dist/cli.js glass-demo                                              # seede
 - **The Damage Meter** (`verify`) compares the current governed surface with a prior baseline JSON. It can run explicit no-shell `--generator` commands before the snapshot, then reports missing registered items, changed content, newly unresolvable evidence or path references, archived items that lost retrieval continuity, new items and the damage fraction. `--damage-threshold` controls when it exits `1`; the default is zero tolerance.
 - **The Glass** (`glass`) starts a local browser review console over the same engine: review queue, proposal inbox, approve, reject and request-edit controls, deterministic apply preview, explicit write, and audit history. It gives a business reviewer a readable surface without Markdown, CLI or Git. New-procedure proposals render as promotion moments. See [demo/glass-demo-script.md](demo/glass-demo-script.md).
 - **The seeded demo** (`glass-demo`) copies the Northwind memory lab into a temp folder, starts Glass against the command estate and loads the procedure-promotion proposal. It is the quickest path through scan, proposal, approve, apply and audit.
+
+## Glass security model
+
+Glass can write files (decisions and, through the Clerk, applied changes), so it is built to be driven only by the person sitting at the machine.
+
+- **One source per server.** `root`, `register`, `memory` and `proposals` are fixed by the `glass` command line. Pages and forms never carry them, and a request that names a different `root`, `proposals`, `register` or `memory` gets `400`. To review another source, start another server.
+- **Loopback only.** `--host` must be `127.0.0.1`, `localhost` or `::1`. Glass has no login.
+- **Host and Origin.** Every request must carry a `Host` of `127.0.0.1:<port>` or `localhost:<port>` (this defeats DNS rebinding). A request with an `Origin` header must carry the server's own origin. Requests with no `Origin`, such as `curl`, are accepted. Anything else gets `403`.
+- **CSRF token.** A random token is generated at startup and embedded in every POST form the server renders. A POST without it gets `403`. The token is never put in a URL.
+- **Reviewer.** Elections are signed by the reviewer fixed at startup: `--by`, else `KERNEL_KEEPER_REVIEWER`, else `git config user.name`, else `reviewer`. The page shows it as a read-only field, and a posted `by` is ignored.
+- **Browser headers.** Pages are sent with a CSP that allows no scripts and no framing, plus `X-Frame-Options: DENY` and `Cache-Control: no-store`.
 
 ## Procedure promotion
 
@@ -52,6 +63,14 @@ For local use, copy `.env.example` to `.env` and fill in the keys. The CLI loads
 
 - **Provenance on every output:** proposer, model, a reproducible `prompt-sha256` (prompt assembly is pure), the evidence file list, reviewed-surface hashes for stale-content refusal, and token usage. `--dry-run` prints exactly the prompts that hash, with zero API calls.
 - **Proposals cannot enter the register.** There is one write chokepoint. `--out-dir` inside the bundle is a hard error (64). Inside the repo root it needs `--allow-in-repo`, because proposal files would otherwise enter link-resolution scope. Proposal IDs are deterministic (no date), so re-runs skip instead of spamming the inbox.
-- **Threat model:** corpus and bundle content is untrusted data. It is fenced, fence delimiters inside content are escaped, and prompts mark repository content as data, not instructions. A poisoned note can at worst produce a plausible-looking proposal, which is exactly why election exists.
+- **Threat model:** corpus and bundle content is untrusted data, and a prompt line is not a control, so the defence is layered. Each layer assumes the one before it failed:
+  1. **Prompt mitigation.** Content is fenced, fence delimiters inside it are escaped, and the prompt says fenced text is data and never an instruction. This lowers the chance a model is talked round. It guarantees nothing.
+  2. **Validator** (`validateDraft` in `src/ai/proposal.ts`, run by the single write chokepoint). It decides everything that carries authority; the model's output only supplies prose. The proposal id must be the deterministic `P-<hash>`, so a model cannot choose the file it is written to. The kind must be one the drafting agent may produce, and no agent may draft `new-procedure`. `needs-human` is set `true` for every agent except the gap-miner, whose value is set in code. The target must be a plain relative path that, after resolving symlinks, stays inside the bundle or estate root. Single-line fields (summary, journal line, index entry, patch values, evidence file names) may not contain a newline or control character. No model text may contain a decision checkbox line, a reserved draft heading (`### Journal line` and the like) or, in prose and drafted bodies, a code fence; any of these would let it forge an election or a draft block. A refusal is logged against the cluster with the reason. Agents build drafts from named fields, never by spreading the model's reply, so an extra `id` or `target` key is ignored.
+  
+  Every value written into the proposal's YAML frontmatter goes through `yamlScalar` or `yamlListItem`: values with newlines or YAML-significant characters are double-quoted with JSON escapes so they stay on one line, values starting `---` are refused, and list items the reader cannot represent are refused. No model string is passed to a shell, used as a URL, or used as a path outside the root.
+  3. **Apply plan confinement.** The Clerk re-checks every proposal file independently of how it was made: it refuses an amend or new-procedure without `needs-human`, a target outside the root, a stale reviewed-surface hash and any planned write that escapes the loaded root.
+  4. **Human election.** Nothing is applied until a named person elects the proposal. A poisoned note can at worst produce a plausible-looking draft that gets declined.
+
+  `tests/ai-injection.test.ts` runs a stubbed model that obeys an injected instruction and shows layers 2 and 3 refusing it.
 - **Cost guards:** `propose` and `drift` print an input-token estimate before any call and print usage totals afterwards. `mine` also takes `--max-calls` (default 25) and aborts before spending if the run would need more.
 - **Failure semantics:** partial failure is first-class. Successes are written, failures are reported, and the exit code is `1`. A missing key or bad out-dir exits `64`. An API that stays unavailable after retries exits `69`.

@@ -1,9 +1,12 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { applyApproved, decideProposal, getAuditTrail, getProposalDetail, listProposals, previewApply, scanSurface } from "./service.js";
 import type { GlassDecision } from "./decisions.js";
 import { procedurePromotionView } from "./procedure-promotion.js";
+import { checkHostAndOrigin, checkSourceParams, csrfTokenValid, isLoopbackHost } from "./guard.js";
+import { resolveReviewer } from "./reviewer.js";
 import type {
   GlassApplyPreview,
   GlassAuditTrail,
@@ -22,6 +25,10 @@ export interface GlassServerOptions {
   host?: string;
   port?: number;
   proposalsDir?: string;
+  /** Who signs elections made in this session. Defaults to KERNEL_KEEPER_REVIEWER, git user.name, then "reviewer". */
+  reviewer?: string;
+  /** Per-process CSRF token. Generated randomly when omitted; tests may pin it. */
+  csrfToken?: string;
 }
 
 export interface GlassServer {
@@ -37,28 +44,13 @@ function escapeHtml(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function registerValue(value: string | null): RegisterMode | undefined {
-  if (value === "skills" || value === "agents" || value === "commands" || value === "estate") return value;
-  return undefined;
+/** Per-request rendering context for the forms the server owns. */
+export interface GlassUi {
+  csrfToken: string;
+  reviewer: string;
 }
 
-interface RequestSource extends GlassServerOptions {
-  proposalsDir?: string;
-}
-
-function sourceFromRequest(req: IncomingMessage, defaults: GlassServerOptions): RequestSource {
-  const url = new URL(req.url ?? "/", "http://localhost");
-  const root = url.searchParams.get("root") || defaults.root;
-  const register = registerValue(url.searchParams.get("register")) ?? defaults.register;
-  const memory = url.searchParams.has("memory") ? url.searchParams.get("memory") === "true" : defaults.memory;
-  const proposalsDir = url.searchParams.get("proposals") || defaults.proposalsDir;
-  return {
-    root,
-    ...(register ? { register } : {}),
-    ...(memory !== undefined ? { memory } : {}),
-    ...(proposalsDir ? { proposalsDir } : {}),
-  };
-}
+const DEFAULT_UI: GlassUi = { csrfToken: "", reviewer: "reviewer" };
 
 function severityClass(severity: string): string {
   if (severity === "HIGH") return "severity high";
@@ -74,18 +66,15 @@ interface DashboardOptions {
   proposalsDir?: string;
 }
 
-function queryFor(scan: GlassScanResult, opts: DashboardOptions, next: Partial<DashboardOptions>): string {
+function queryFor(opts: DashboardOptions, next: Partial<DashboardOptions>): string {
   const params = new URLSearchParams();
-  params.set("root", scan.source.root);
-  if (scan.source.register) params.set("register", scan.source.register);
-  if (scan.source.memory !== undefined) params.set("memory", String(scan.source.memory));
   const merged = { ...opts, ...next };
-  if (merged.proposalsDir) params.set("proposals", merged.proposalsDir);
   if (merged.severity) params.set("severity", merged.severity);
   if (merged.check) params.set("check", merged.check);
   if (merged.owner) params.set("owner", merged.owner);
   if (merged.findingId) params.set("finding", merged.findingId);
-  return `/?${params.toString()}`;
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
 }
 
 function filteredFindings(scan: GlassScanResult, opts: DashboardOptions): GlassFinding[] {
@@ -108,8 +97,11 @@ function sourceExcerpt(source: GlassSource, file: string | undefined): string | 
   for (const candidate of candidates) {
     try {
       const relativePath = relative(candidate.root, candidate.path);
-      if (relativePath.startsWith("..") || isAbsolute(relativePath)) continue;
+      if (relativePath === ".." || relativePath.startsWith("../") || isAbsolute(relativePath)) continue;
       if (!existsSync(candidate.path) || !lstatSync(candidate.path).isFile()) continue;
+      // Resolve symlinks so a link inside the root cannot expose a file outside it.
+      const realRelative = relative(realpathSync(candidate.root), realpathSync(candidate.path));
+      if (realRelative === ".." || realRelative.startsWith("../") || isAbsolute(realRelative)) continue;
       return readFileSync(candidate.path, "utf8").slice(0, 1800);
     } catch {
       /* try next */
@@ -118,29 +110,16 @@ function sourceExcerpt(source: GlassSource, file: string | undefined): string | 
   return null;
 }
 
-function sourceParams(source: GlassSource, proposalsDir?: string): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("root", source.root);
-  if (source.register) params.set("register", source.register);
-  if (source.memory !== undefined) params.set("memory", String(source.memory));
-  if (proposalsDir) params.set("proposals", proposalsDir);
-  return params;
+function reviewHref(): string {
+  return "/";
 }
 
-function reviewHref(source: GlassSource, proposalsDir?: string): string {
-  return `/?${sourceParams(source, proposalsDir).toString()}`;
+function proposalsHref(proposalId?: string): string {
+  return proposalId ? `/proposals?${new URLSearchParams({ proposal: proposalId }).toString()}` : "/proposals";
 }
 
-function proposalsHref(source: GlassSource, proposalsDir: string, proposalId?: string): string {
-  const params = sourceParams(source, proposalsDir);
-  if (proposalId) params.set("proposal", proposalId);
-  return `/proposals?${params.toString()}`;
-}
-
-function applyHref(source: GlassSource, proposalsDir: string, proposalId?: string): string {
-  const params = sourceParams(source, proposalsDir);
-  if (proposalId) params.set("proposal", proposalId);
-  return `/apply?${params.toString()}`;
+function applyHref(proposalId?: string): string {
+  return proposalId ? `/apply?${new URLSearchParams({ proposal: proposalId }).toString()}` : "/apply";
 }
 
 function stateClass(state: string): string {
@@ -225,10 +204,9 @@ function renderFindingDetail(scan: GlassScanResult, finding: GlassFinding | unde
 }
 
 function renderProposalDetail(
-  source: GlassSource,
-  proposalsDir: string,
   proposal: GlassProposalDetail | null,
   preview: GlassApplyPreview | null,
+  ui: GlassUi,
 ): string {
   if (!proposal) return `<section class="panel detail muted">Select a proposal to review its evidence, provenance, and decision controls.</section>`;
   const planned = preview?.planned.find((item) => item.proposal.id === proposal.id);
@@ -267,19 +245,19 @@ function renderProposalDetail(
     </div>
     <div class="actions">
       <form method="post" action="/proposals/decision">
-        ${decisionHiddenFields(source, proposalsDir, proposal.id)}
+        ${postFields(ui, proposal.id)}
         <input type="hidden" name="decision" value="approve">
-        <input type="hidden" name="by" value="Claire">
+        ${reviewerField(ui)}
         <button type="submit">Approve</button>
       </form>
       <form method="post" action="/proposals/decision">
-        ${decisionHiddenFields(source, proposalsDir, proposal.id)}
+        ${postFields(ui, proposal.id)}
         <input type="hidden" name="decision" value="request-edit">
         <input name="note" placeholder="Edit request">
         <button type="submit">Request Edit</button>
       </form>
       <form method="post" action="/proposals/decision">
-        ${decisionHiddenFields(source, proposalsDir, proposal.id)}
+        ${postFields(ui, proposal.id)}
         <input type="hidden" name="decision" value="reject">
         <input name="note" placeholder="Reason">
         <button type="submit">Reject</button>
@@ -290,12 +268,17 @@ function renderProposalDetail(
   </section>`;
 }
 
-function decisionHiddenFields(source: GlassSource, proposalsDir: string, proposalId: string): string {
-  return `<input type="hidden" name="root" value="${escapeHtml(source.root)}">
-    ${source.register ? `<input type="hidden" name="register" value="${escapeHtml(source.register)}">` : ""}
-    ${source.memory !== undefined ? `<input type="hidden" name="memory" value="${escapeHtml(String(source.memory))}">` : ""}
-    <input type="hidden" name="proposals" value="${escapeHtml(proposalsDir)}">
+/** Hidden fields on every POST form: the CSRF token and the proposal the action is about. */
+function postFields(ui: GlassUi, proposalId: string): string {
+  return `<input type="hidden" name="csrf" value="${escapeHtml(ui.csrfToken)}">
     <input type="hidden" name="proposal" value="${escapeHtml(proposalId)}">`;
+}
+
+/** Shows who will sign. Display only: the server uses its own configured reviewer, never a posted one. */
+function reviewerField(ui: GlassUi): string {
+  return `<label>Electing as
+          <input value="${escapeHtml(ui.reviewer)}" readonly aria-label="Reviewer">
+        </label>`;
 }
 
 export function renderProposalInbox(
@@ -305,6 +288,7 @@ export function renderProposalInbox(
   selected: GlassProposalDetail | null = null,
   preview: GlassApplyPreview | null = null,
   refused: { proposal: string; summary: string; technicalReason: string }[] = [],
+  ui: GlassUi = DEFAULT_UI,
 ): string {
   const selectedId = selected?.id ?? proposals[0]?.id;
   const rows = proposals.map((proposal) => `
@@ -316,7 +300,7 @@ export function renderProposalInbox(
       </td>
       <td>${escapeHtml(proposal.target ?? "New item")}</td>
       <td>${proposal.checks.map(escapeHtml).join(", ")}</td>
-      <td><a href="${escapeHtml(proposalsHref(source, proposalsDir ?? "", proposal.id))}">Open detail</a></td>
+      <td><a href="${escapeHtml(proposalsHref(proposal.id))}">Open detail</a></td>
     </tr>
   `).join("");
   return `<!doctype html>
@@ -335,9 +319,9 @@ export function renderProposalInbox(
         <div class="muted">Business review console</div>
       </div>
       <nav class="nav" aria-label="Glass sections">
-        <div><a href="${escapeHtml(reviewHref(source, proposalsDir))}">Review Queue</a></div>
+        <div><a href="${escapeHtml(reviewHref())}">Review Queue</a></div>
         <div class="active">Proposals</div>
-        <div>${proposalsDir ? `<a href="${escapeHtml(applyHref(source, proposalsDir, selectedId))}">Apply</a>` : "Apply"}</div>
+        <div>${proposalsDir ? `<a href="${escapeHtml(applyHref(selectedId))}">Apply</a>` : "Apply"}</div>
         <div>Audit</div>
         <div>Settings</div>
       </nav>
@@ -350,26 +334,9 @@ export function renderProposalInbox(
         </div>
         <div class="muted">${escapeHtml(proposalsDir ?? "No proposal directory configured")}</div>
       </div>
-      <form method="get" action="/proposals">
-        <label>Source path
-          <input name="root" value="${escapeHtml(source.root)}">
-        </label>
-        <label>Register
-          <select name="register">
-            <option value=""${source.kind === "bundle" ? " selected" : ""}>Truth bundle</option>
-            <option value="estate"${source.register === "estate" ? " selected" : ""}>Estate</option>
-            <option value="skills"${source.register === "skills" ? " selected" : ""}>Skills</option>
-            <option value="agents"${source.register === "agents" ? " selected" : ""}>Agents</option>
-            <option value="commands"${source.register === "commands" ? " selected" : ""}>Commands</option>
-          </select>
-        </label>
-        <label>Proposals path
-          <input name="proposals" value="${escapeHtml(proposalsDir ?? "")}">
-        </label>
-        <button type="submit">Load</button>
-      </form>
+      <div class="muted" style="margin-bottom: 20px;">Source: ${escapeHtml(source.root)}</div>
       ${refused.length ? `<section class="panel detail"><h2>Refused Proposal Files</h2>${refused.map((item) => `<p><strong>${escapeHtml(item.proposal)}</strong>: ${escapeHtml(item.summary)}</p>`).join("")}</section>` : ""}
-      ${proposalsDir && selectedId ? renderProposalDetail(source, proposalsDir, selected, preview) : `<section class="panel empty">Add a proposals directory to review drafted changes.</section>`}
+      ${proposalsDir && selectedId ? renderProposalDetail(selected, preview, ui) : `<section class="panel empty">Add a proposals directory to review drafted changes.</section>`}
       ${rows ? `<table>
         <thead><tr><th style="width: 110px;">State</th><th>Proposal</th><th>Target</th><th>Checks</th><th style="width: 110px;">Detail</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -417,7 +384,7 @@ export function renderApplyPage(
   proposalsDir: string | undefined,
   preview: GlassApplyPreview | null = null,
   audit: GlassAuditTrail | null = null,
-  opts: { proposalId?: string; message?: string } = {},
+  opts: { proposalId?: string; message?: string; ui?: GlassUi } = {},
 ): string {
   return `<!doctype html>
 <html lang="en">
@@ -435,8 +402,8 @@ export function renderApplyPage(
         <div class="muted">Business review console</div>
       </div>
       <nav class="nav" aria-label="Glass sections">
-        <div><a href="${escapeHtml(reviewHref(source, proposalsDir))}">Review Queue</a></div>
-        <div>${proposalsDir ? `<a href="${escapeHtml(proposalsHref(source, proposalsDir, opts.proposalId))}">Proposals</a>` : "Proposals"}</div>
+        <div><a href="${escapeHtml(reviewHref())}">Review Queue</a></div>
+        <div>${proposalsDir ? `<a href="${escapeHtml(proposalsHref(opts.proposalId))}">Proposals</a>` : "Proposals"}</div>
         <div class="active">Apply</div>
         <div>Audit</div>
         <div>Settings</div>
@@ -450,31 +417,14 @@ export function renderApplyPage(
         </div>
         <div class="muted">${escapeHtml(proposalsDir ?? "No proposal directory configured")}</div>
       </div>
-      <form method="get" action="/apply">
-        <label>Source path
-          <input name="root" value="${escapeHtml(source.root)}">
-        </label>
-        <label>Register
-          <select name="register">
-            <option value=""${source.kind === "bundle" ? " selected" : ""}>Truth bundle</option>
-            <option value="estate"${source.register === "estate" ? " selected" : ""}>Estate</option>
-            <option value="skills"${source.register === "skills" ? " selected" : ""}>Skills</option>
-            <option value="agents"${source.register === "agents" ? " selected" : ""}>Agents</option>
-            <option value="commands"${source.register === "commands" ? " selected" : ""}>Commands</option>
-          </select>
-        </label>
-        <label>Proposals path
-          <input name="proposals" value="${escapeHtml(proposalsDir ?? "")}">
-        </label>
-        <button type="submit">Preview</button>
-      </form>
+      <div class="muted" style="margin-bottom: 20px;">Source: ${escapeHtml(source.root)}</div>
       ${opts.message ? `<section class="panel detail"><h2>Result</h2><p>${escapeHtml(opts.message)}</p></section>` : ""}
       ${preview ? renderSafety(preview) : `<section class="panel empty">Add a proposals directory to preview approved changes.</section>`}
       ${preview?.canWrite ? `<section class="panel detail">
         <h2>Apply Approved Changes</h2>
         <p class="muted">Type apply by pressing the button below. Glass writes through the deterministic Clerk and records the existing audit markers.</p>
         <form method="post" action="/apply/write">
-          ${decisionHiddenFields(source, proposalsDir ?? "", opts.proposalId ?? "")}
+          ${postFields(opts.ui ?? DEFAULT_UI, opts.proposalId ?? "")}
           <input type="hidden" name="confirm" value="apply">
           <button type="submit">Apply Approved</button>
         </form>
@@ -504,7 +454,7 @@ export function renderGlassDashboard(scan: GlassScanResult, opts: DashboardOptio
       <td>${escapeHtml(finding.owner ?? "Needs owner")}</td>
       <td>
         ${escapeHtml(finding.recommendedAction)}
-        <div><a href="${escapeHtml(queryFor(scan, opts, { findingId: finding.id }))}">Open detail</a></div>
+        <div><a href="${escapeHtml(queryFor(opts, { findingId: finding.id }))}">Open detail</a></div>
       </td>
     </tr>
   `).join("");
@@ -684,8 +634,8 @@ export function renderGlassDashboard(scan: GlassScanResult, opts: DashboardOptio
       </div>
       <nav class="nav" aria-label="Glass sections">
         <div class="active">Review Queue</div>
-        <div>${opts.proposalsDir ? `<a href="${escapeHtml(proposalsHref(scan.source, opts.proposalsDir))}">Proposals</a>` : "Proposals"}</div>
-        <div>${opts.proposalsDir ? `<a href="${escapeHtml(applyHref(scan.source, opts.proposalsDir))}">Apply</a>` : "Apply"}</div>
+        <div>${opts.proposalsDir ? `<a href="${escapeHtml(proposalsHref())}">Proposals</a>` : "Proposals"}</div>
+        <div>${opts.proposalsDir ? `<a href="${escapeHtml(applyHref())}">Apply</a>` : "Apply"}</div>
         <div>Audit</div>
         <div>Settings</div>
       </nav>
@@ -699,34 +649,7 @@ export function renderGlassDashboard(scan: GlassScanResult, opts: DashboardOptio
         <div class="muted">${escapeHtml(scan.source.root)}</div>
       </div>
 
-      <form method="get" action="/">
-        <label>Source path
-          <input name="root" value="${escapeHtml(scan.source.root)}">
-        </label>
-        <label>Register
-          <select name="register">
-            <option value=""${scan.source.kind === "bundle" ? " selected" : ""}>Truth bundle</option>
-            <option value="estate"${scan.source.register === "estate" ? " selected" : ""}>Estate</option>
-            <option value="skills"${scan.source.register === "skills" ? " selected" : ""}>Skills</option>
-            <option value="agents"${scan.source.register === "agents" ? " selected" : ""}>Agents</option>
-            <option value="commands"${scan.source.register === "commands" ? " selected" : ""}>Commands</option>
-          </select>
-        </label>
-        <label>Memory mode
-          <select name="memory">
-            <option value="false"${scan.source.memory ? "" : " selected"}>Off</option>
-            <option value="true"${scan.source.memory ? " selected" : ""}>On</option>
-          </select>
-        </label>
-        ${opts.proposalsDir ? `<input type="hidden" name="proposals" value="${escapeHtml(opts.proposalsDir)}">` : ""}
-        <button type="submit">Scan</button>
-      </form>
-
       <form class="filters" method="get" action="/">
-        <input type="hidden" name="root" value="${escapeHtml(scan.source.root)}">
-        ${scan.source.register ? `<input type="hidden" name="register" value="${escapeHtml(scan.source.register)}">` : ""}
-        ${scan.source.memory !== undefined ? `<input type="hidden" name="memory" value="${escapeHtml(String(scan.source.memory))}">` : ""}
-        ${opts.proposalsDir ? `<input type="hidden" name="proposals" value="${escapeHtml(opts.proposalsDir)}">` : ""}
         <label>Severity
           <select name="severity">
             <option value=""${opts.severity ? "" : " selected"}>Any</option>
@@ -798,37 +721,41 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body, null, 2));
 }
 
+const MAX_FORM_BYTES = 64 * 1024;
+const MAX_NOTE_LENGTH = 500;
+
 function readForm(req: IncomingMessage): Promise<URLSearchParams> {
   return new Promise((resolveRead, reject) => {
     let body = "";
+    let size = 0;
     req.setEncoding("utf8");
-    req.on("data", (chunk) => {
+    req.on("data", (chunk: string) => {
+      size += Buffer.byteLength(chunk);
+      if (size > MAX_FORM_BYTES) {
+        reject(new FormTooLargeError());
+        req.destroy();
+        return;
+      }
       body += chunk;
-      if (body.length > 1024 * 64) reject(new Error("form body too large"));
     });
     req.on("end", () => resolveRead(new URLSearchParams(body)));
     req.on("error", reject);
   });
 }
 
-function sourceFromValues(values: URLSearchParams, defaults: GlassServerOptions): RequestSource {
-  const register = registerValue(values.get("register")) ?? defaults.register;
-  const memory = values.has("memory") ? values.get("memory") === "true" : defaults.memory;
-  const proposalsDir = values.get("proposals") || defaults.proposalsDir;
-  return {
-    root: values.get("root") || defaults.root,
-    ...(register ? { register } : {}),
-    ...(memory !== undefined ? { memory } : {}),
-    ...(proposalsDir ? { proposalsDir } : {}),
-  };
+class FormTooLargeError extends Error {
+  constructor() {
+    super("form body too large");
+  }
 }
 
-function glassSourceFor(current: RequestSource): GlassSource {
+/** The one source this server was launched with. Requests cannot change it. */
+function configuredSource(options: GlassServerOptions): GlassSource {
   return {
-    root: resolve(current.root),
-    kind: current.register ? "estate" : "bundle",
-    ...(current.register ? { register: current.register } : {}),
-    ...(current.memory !== undefined ? { memory: current.memory } : {}),
+    root: resolve(options.root),
+    kind: options.register ? "estate" : "bundle",
+    ...(options.register ? { register: options.register } : {}),
+    ...(options.memory !== undefined ? { memory: options.memory } : {}),
   };
 }
 
@@ -837,150 +764,162 @@ function decisionValue(value: string | null): GlassDecision | null {
   return null;
 }
 
+function setSecurityHeaders(res: ServerResponse): void {
+  // No scripts are served, so nothing may run; forms may only post back to this origin,
+  // and the pages may not be framed (clickjacking the Approve button).
+  res.setHeader("content-security-policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  res.setHeader("x-frame-options", "DENY");
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("referrer-policy", "no-referrer");
+  res.setHeader("cache-control", "no-store");
+}
+
+function refuse(res: ServerResponse, status: number, reason: string): void {
+  res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
+  res.end(reason);
+}
+
+interface GlassRuntime {
+  options: GlassServerOptions;
+  csrfToken: string;
+  reviewer: string;
+  boundHost: string;
+}
+
 export function createGlassServer(options: GlassServerOptions): Server {
+  const runtime: GlassRuntime = {
+    options,
+    csrfToken: options.csrfToken ?? randomBytes(32).toString("hex"),
+    reviewer: resolveReviewer(options.reviewer),
+    boundHost: options.host ?? "127.0.0.1",
+  };
   return createServer((req, res) => {
-    void handleGlassRequest(req, res, options).catch((err) => {
+    void handleGlassRequest(req, res, runtime).catch((err) => {
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      if (err instanceof FormTooLargeError) {
+        refuse(res, 413, "Form body too large.");
+        return;
+      }
       res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
       res.end(err instanceof Error ? err.message : String(err));
     });
   });
 }
 
-async function handleGlassRequest(req: IncomingMessage, res: ServerResponse, options: GlassServerOptions): Promise<void> {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const current = sourceFromRequest(req, options);
-    const dashboardOpts: DashboardOptions = {
-      ...(current.proposalsDir ? { proposalsDir: current.proposalsDir } : {}),
-      ...(url.searchParams.get("severity") ? { severity: url.searchParams.get("severity") as string } : {}),
-      ...(url.searchParams.get("check") ? { check: url.searchParams.get("check") as string } : {}),
-      ...(url.searchParams.get("owner") ? { owner: url.searchParams.get("owner") as string } : {}),
-      ...(url.searchParams.get("finding") ? { findingId: url.searchParams.get("finding") as string } : {}),
-    };
-    try {
-      if (url.pathname === "/proposals/decision" && req.method === "POST") {
-        const form = await readForm(req);
-        const posted = sourceFromValues(form, options);
-        const proposalId = form.get("proposal");
-        const decision = decisionValue(form.get("decision"));
-        if (!posted.proposalsDir || !proposalId || !decision) throw new Error("proposal decision requires proposals, proposal, and decision");
-        const by = form.get("by")?.trim();
-        const note = form.get("note")?.trim();
-        decideProposal(posted.proposalsDir, proposalId, decision, {
-          ...(by ? { by } : {}),
-          ...(note ? { note } : {}),
-        });
-        res.writeHead(303, { location: proposalsHref(glassSourceFor(posted), posted.proposalsDir, proposalId) });
-        res.end();
-        return;
-      }
-      if (url.pathname === "/apply/write" && req.method === "POST") {
-        const form = await readForm(req);
-        const posted = sourceFromValues(form, options);
-        if (!posted.proposalsDir || form.get("confirm") !== "apply") throw new Error("apply write requires proposals and explicit confirmation");
-        const proposalId = form.get("proposal") || undefined;
-        const result = applyApproved(posted.root, {
-          proposalsDir: posted.proposalsDir,
-          ...(posted.register ? { register: posted.register } : {}),
-          ...(proposalId ? { proposalId } : {}),
-        });
-        const afterPreview = previewApply(posted.root, {
-          proposalsDir: posted.proposalsDir,
-          ...(posted.register ? { register: posted.register } : {}),
-          ...(proposalId ? { proposalId } : {}),
-        });
-        const source = glassSourceFor(posted);
-        const audit = getAuditTrail(posted.root, {
-          ...(posted.register ? { register: posted.register } : {}),
-          ...(posted.memory !== undefined ? { memory: posted.memory } : {}),
-        });
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(renderApplyPage(source, posted.proposalsDir, afterPreview, audit, {
-          ...(proposalId ? { proposalId } : {}),
-          message: `Applied ${result.written.length} file(s).`,
-        }));
-        return;
-      }
-      if (url.pathname === "/api/scan") {
-        json(res, 200, scanSurface(current.root, {
-          ...(current.register ? { register: current.register } : {}),
-          ...(current.memory !== undefined ? { memory: current.memory } : {}),
-        }));
-        return;
-      }
-      if (url.pathname === "/proposals") {
-        const source = glassSourceFor(current);
-        if (!current.proposalsDir) {
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-          res.end(renderProposalInbox(source, undefined));
-          return;
-        }
-        const listed = listProposals(current.proposalsDir);
-        const selectedId = url.searchParams.get("proposal") || listed.proposals[0]?.id;
-        const detail = selectedId ? getProposalDetail(current.proposalsDir, selectedId) : null;
-        const preview = detail?.elected ? previewApply(current.root, {
-          proposalsDir: current.proposalsDir,
-          ...(current.register ? { register: current.register } : {}),
-          proposalId: detail.id,
-        }) : null;
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(renderProposalInbox(source, current.proposalsDir, listed.proposals, detail, preview, listed.refused));
-        return;
-      }
-      if (url.pathname === "/apply") {
-        const source = glassSourceFor(current);
-        if (!current.proposalsDir) {
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-          res.end(renderApplyPage(source, undefined));
-          return;
-        }
-        const proposalId = url.searchParams.get("proposal") || undefined;
-        const preview = previewApply(current.root, {
-          proposalsDir: current.proposalsDir,
-          ...(current.register ? { register: current.register } : {}),
-          ...(proposalId ? { proposalId } : {}),
-        });
-        const audit = getAuditTrail(current.root, {
-          ...(current.register ? { register: current.register } : {}),
-          ...(current.memory !== undefined ? { memory: current.memory } : {}),
-        });
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(renderApplyPage(source, current.proposalsDir, preview, audit, {
-          ...(proposalId ? { proposalId } : {}),
-        }));
-        return;
-      }
-      if (url.pathname !== "/") {
-        res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-        res.end("Not found");
-        return;
-      }
-      const scan = scanSurface(current.root, {
-        ...(current.register ? { register: current.register } : {}),
-        ...(current.memory !== undefined ? { memory: current.memory } : {}),
-      });
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(renderGlassDashboard(scan, dashboardOpts));
-    } catch (err) {
-      const source: GlassSource = {
-        root: resolve(current.root),
-        kind: current.register ? "estate" : "bundle",
-        ...(current.register ? { register: current.register } : {}),
-        ...(current.memory !== undefined ? { memory: current.memory } : {}),
-      };
-      res.writeHead(url.pathname === "/api/scan" ? 500 : 200, {
-        "content-type": url.pathname === "/api/scan" ? "application/json; charset=utf-8" : "text/html; charset=utf-8",
-      });
-      if (url.pathname === "/api/scan") res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
-      else if (url.pathname === "/proposals") res.end(renderProposalInbox(source, current.proposalsDir));
-      else if (url.pathname === "/apply") res.end(renderApplyPage(source, current.proposalsDir));
-      else res.end(renderError(err, source));
+async function handleGlassRequest(req: IncomingMessage, res: ServerResponse, runtime: GlassRuntime): Promise<void> {
+  const { options, reviewer } = runtime;
+  setSecurityHeaders(res);
+
+  // Guards run before any routing, for every method.
+  const hostFailure = checkHostAndOrigin(req.headers, req.socket.localPort ?? 0, runtime.boundHost);
+  if (hostFailure) return refuse(res, hostFailure.status, hostFailure.reason);
+  const method = req.method ?? "GET";
+  if (method !== "GET" && method !== "HEAD" && method !== "POST") return refuse(res, 405, "Method not allowed.");
+
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const queryFailure = checkSourceParams(url.searchParams, options);
+  if (queryFailure) return refuse(res, queryFailure.status, queryFailure.reason);
+
+  const form = method === "POST" ? await readForm(req) : null;
+  if (form) {
+    if (!csrfTokenValid(runtime.csrfToken, form.get("csrf"))) return refuse(res, 403, "Missing or invalid CSRF token.");
+    const formFailure = checkSourceParams(form, options);
+    if (formFailure) return refuse(res, formFailure.status, formFailure.reason);
+  }
+
+  const root = resolve(options.root);
+  const register = options.register;
+  const memory = options.memory;
+  const proposalsDir = options.proposalsDir;
+  const source = configuredSource(options);
+  const ui: GlassUi = { csrfToken: runtime.csrfToken, reviewer };
+  const registerOpt = register ? { register } : {};
+  const memoryOpt = memory !== undefined ? { memory } : {};
+  const dashboardOpts: DashboardOptions = {
+    ...(proposalsDir ? { proposalsDir } : {}),
+    ...(url.searchParams.get("severity") ? { severity: url.searchParams.get("severity") as string } : {}),
+    ...(url.searchParams.get("check") ? { check: url.searchParams.get("check") as string } : {}),
+    ...(url.searchParams.get("owner") ? { owner: url.searchParams.get("owner") as string } : {}),
+    ...(url.searchParams.get("finding") ? { findingId: url.searchParams.get("finding") as string } : {}),
+  };
+  const html = (body: string, status = 200): void => {
+    res.writeHead(status, { "content-type": "text/html; charset=utf-8" });
+    res.end(body);
+  };
+  try {
+    if (url.pathname === "/proposals/decision" && form) {
+      const proposalId = form.get("proposal");
+      const decision = decisionValue(form.get("decision"));
+      if (!proposalsDir || !proposalId || !decision) throw new Error("proposal decision requires a configured proposals directory, proposal, and decision");
+      const note = form.get("note")?.trim().slice(0, MAX_NOTE_LENGTH);
+      // The reviewer is the one resolved at startup. A posted "by" is ignored.
+      decideProposal(proposalsDir, proposalId, decision, { by: reviewer, ...(note ? { note } : {}) });
+      res.writeHead(303, { location: proposalsHref(proposalId) });
+      res.end();
+      return;
     }
+    if (url.pathname === "/apply/write" && form) {
+      if (!proposalsDir || form.get("confirm") !== "apply") throw new Error("apply write requires a configured proposals directory and explicit confirmation");
+      const proposalId = form.get("proposal") || undefined;
+      const applyOpts = { proposalsDir, ...registerOpt, ...(proposalId ? { proposalId } : {}) };
+      const result = applyApproved(root, applyOpts);
+      const afterPreview = previewApply(root, applyOpts);
+      const audit = getAuditTrail(root, { ...registerOpt, ...memoryOpt });
+      html(renderApplyPage(source, proposalsDir, afterPreview, audit, {
+        ...(proposalId ? { proposalId } : {}),
+        message: `Applied ${result.written.length} file(s).`,
+        ui,
+      }));
+      return;
+    }
+    if (form) return refuse(res, 404, "Not found");
+    if (url.pathname === "/api/scan") {
+      json(res, 200, scanSurface(root, { ...registerOpt, ...memoryOpt }));
+      return;
+    }
+    if (url.pathname === "/proposals") {
+      if (!proposalsDir) return html(renderProposalInbox(source, undefined, [], null, null, [], ui));
+      const listed = listProposals(proposalsDir);
+      const selectedId = url.searchParams.get("proposal") || listed.proposals[0]?.id;
+      const detail = selectedId ? getProposalDetail(proposalsDir, selectedId) : null;
+      const preview = detail?.elected ? previewApply(root, { proposalsDir, ...registerOpt, proposalId: detail.id }) : null;
+      return html(renderProposalInbox(source, proposalsDir, listed.proposals, detail, preview, listed.refused, ui));
+    }
+    if (url.pathname === "/apply") {
+      if (!proposalsDir) return html(renderApplyPage(source, undefined, null, null, { ui }));
+      const proposalId = url.searchParams.get("proposal") || undefined;
+      const preview = previewApply(root, { proposalsDir, ...registerOpt, ...(proposalId ? { proposalId } : {}) });
+      const audit = getAuditTrail(root, { ...registerOpt, ...memoryOpt });
+      return html(renderApplyPage(source, proposalsDir, preview, audit, { ...(proposalId ? { proposalId } : {}), ui }));
+    }
+    if (url.pathname !== "/") return refuse(res, 404, "Not found");
+    const scan = scanSurface(root, { ...registerOpt, ...memoryOpt });
+    html(renderGlassDashboard(scan, dashboardOpts));
+  } catch (err) {
+    if (err instanceof FormTooLargeError) throw err;
+    if (url.pathname === "/api/scan") {
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+    } else if (url.pathname === "/proposals") {
+      html(renderProposalInbox(source, proposalsDir, [], null, null, [], ui));
+    } else if (url.pathname === "/apply") {
+      html(renderApplyPage(source, proposalsDir, null, null, { ui }));
+    } else {
+      html(renderError(err, source));
+    }
+  }
 }
 
 export async function startGlassServer(options: GlassServerOptions): Promise<GlassServer> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 8787;
-  const server = createGlassServer(options);
+  // Glass has no login. The Host and Origin checks only make sense on loopback, so refuse anything else.
+  if (!isLoopbackHost(host)) {
+    throw new Error(`Glass has no authentication and only binds to loopback (127.0.0.1, localhost or ::1), not ${host}.`);
+  }
+  const server = createGlassServer({ ...options, host });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -990,5 +929,6 @@ export async function startGlassServer(options: GlassServerOptions): Promise<Gla
   });
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
-  return { server, url: `http://${host}:${actualPort}` };
+  const urlHost = host === "::1" ? "[::1]" : host;
+  return { server, url: `http://${urlHost}:${actualPort}` };
 }

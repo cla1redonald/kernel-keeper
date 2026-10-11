@@ -57,6 +57,19 @@ function isEvidencePath(bundlePath: string): boolean {
   return first !== undefined && EVIDENCE_DIRS.has(first);
 }
 
+/** Strip surrounding quotes. A double-quoted value with JSON-style escapes (as the proposal writer emits) is unescaped. */
+function unquoteScalar(raw: string): string {
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (typeof parsed === "string") return parsed;
+    } catch {
+      /* not a valid escaped string: fall through to plain stripping */
+    }
+  }
+  return raw.replace(/^["']|["']$/g, "");
+}
+
 function parseSimpleFrontmatterBlock(block: string): Frontmatter {
   const fm: Frontmatter = {};
   for (const line of block.split(/\r?\n/)) {
@@ -71,7 +84,7 @@ function parseSimpleFrontmatterBlock(block: string): Frontmatter {
         .map((s) => s.trim())
         .filter(Boolean);
     } else {
-      fm[key] = raw.replace(/^["']|["']$/g, "");
+      fm[key] = unquoteScalar(raw);
     }
   }
   return fm;

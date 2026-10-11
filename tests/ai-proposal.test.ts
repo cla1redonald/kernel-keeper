@@ -9,6 +9,8 @@ import { sha256Hex, proposalIdFor, buildProvenance } from "../src/ai/provenance.
 import { parseFrontmatter, loadBundle } from "../src/core/bundle.js";
 import type { ProposalDraft, Provenance } from "../src/ai/types.js";
 
+const SCOPE = { repoRoot: "/tmp/kk-scope", surfaceRoot: "/tmp/kk-scope/bundle", agent: "scribe" as const };
+
 const DRAFT: ProposalDraft = {
   id: "P-abc123def456",
   kind: "amend",
@@ -96,9 +98,9 @@ describe("out-dir safety (the chokepoint)", () => {
   it("writeProposal skips existing ids unless force", () => {
     const out = mkdtempSync(join(tmpdir(), "kk-props-"));
     try {
-      expect(writeProposal(out, DRAFT, PROV, false).skipped).toBe(false);
-      expect(writeProposal(out, DRAFT, PROV, false).skipped).toBe(true);
-      expect(writeProposal(out, DRAFT, PROV, true).skipped).toBe(false);
+      expect(writeProposal(out, DRAFT, PROV, false, SCOPE).skipped).toBe(false);
+      expect(writeProposal(out, DRAFT, PROV, false, SCOPE).skipped).toBe(true);
+      expect(writeProposal(out, DRAFT, PROV, true, SCOPE).skipped).toBe(false);
       expect(readdirSync(out)).toEqual(["P-abc123def456.md"]);
     } finally {
       rmSync(out, { recursive: true, force: true });
@@ -148,7 +150,7 @@ describe("listPendingProposals", () => {
   it("round-trips the renderer's own heading (shared constant cannot desync)", () => {
     const out = mkdtempSync(join(tmpdir(), "kk-pending-"));
     try {
-      writeProposal(out, DRAFT, PROV, false);
+      writeProposal(out, DRAFT, PROV, false, SCOPE);
       const [p] = listPendingProposals(out);
       expect(p?.summary).toBe(DRAFT.summary);
       expect(p?.id).toBe(DRAFT.id);
