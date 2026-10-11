@@ -327,7 +327,7 @@ export async function runDriftReview(inputPath: string, opts: DriftReviewOptions
     });
     result.usageTotals.input += res.usage.input_tokens;
     result.usageTotals.output += res.usage.output_tokens;
-    return writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: surface.repoRoot, surfaceRoot: surface.root });
+    return writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: surface.repoRoot, surfaceRoot: surface.root, agent: "drift-reviewer" });
   }));
 
   settled.forEach((s, i) => {

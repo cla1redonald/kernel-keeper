@@ -53,7 +53,7 @@ const DRAFT: ProposalDraft = {
   evidenceQuotes: [],
   needsHuman: false,
 };
-const SCOPE = { repoRoot: "/work/repo", surfaceRoot: "/work/repo/bundle" };
+const SCOPE = { repoRoot: "/work/repo", surfaceRoot: "/work/repo/bundle", agent: "scribe" as const };
 
 describe("validateDraft: code-level guarantees behind the prompt fence", () => {
   it("accepts repo-relative and surface-relative targets inside the root", () => {
@@ -74,10 +74,18 @@ describe("validateDraft: code-level guarantees behind the prompt fence", () => {
     }
   });
 
-  it("forces needsHuman for amend and new-procedure, whatever the model said", () => {
+  it("decides needsHuman in code: true for every agent except the gap-miner, whose value is set in code", () => {
     expect(validateDraft({ ...DRAFT, kind: "amend", needsHuman: false }, SCOPE).needsHuman).toBe(true);
-    expect(validateDraft({ ...DRAFT, kind: "new-procedure", needsHuman: false }, SCOPE).needsHuman).toBe(true);
-    expect(validateDraft({ ...DRAFT, kind: "new-concept", needsHuman: false }, SCOPE).needsHuman).toBe(false);
+    expect(validateDraft({ ...DRAFT, kind: "new-concept", needsHuman: false }, SCOPE).needsHuman).toBe(true);
+    expect(validateDraft({ ...DRAFT, kind: "amend", needsHuman: false }, { ...SCOPE, agent: "drift-reviewer" }).needsHuman).toBe(true);
+    expect(validateDraft({ ...DRAFT, kind: "new-concept", needsHuman: false }, { ...SCOPE, agent: "gap-miner" }).needsHuman).toBe(false);
+  });
+
+  it("decides which kinds an agent may draft, and never allows new-procedure", () => {
+    expect(() => validateDraft({ ...DRAFT, kind: "new-procedure" }, SCOPE)).toThrow(/may not draft/);
+    expect(() => validateDraft({ ...DRAFT, kind: "new-procedure" }, { ...SCOPE, agent: "gap-miner" })).toThrow(/may not draft/);
+    expect(() => validateDraft({ ...DRAFT, kind: "new-concept" }, { ...SCOPE, agent: "drift-reviewer" })).toThrow(/may not draft/);
+    expect(() => validateDraft({ ...DRAFT, kind: "amend" }, { ...SCOPE, agent: "gap-miner" })).toThrow(/may not draft/);
   });
 });
 

@@ -147,7 +147,7 @@ export async function runScribe(bundlePath: string, opts: ScribeOptions): Promis
     });
     result.usageTotals.input += res.usage.input_tokens;
     result.usageTotals.output += res.usage.output_tokens;
-    return writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot });
+    return writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot, agent: "scribe" });
   }));
 
   settled.forEach((s, i) => {

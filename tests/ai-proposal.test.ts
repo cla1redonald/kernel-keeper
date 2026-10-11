@@ -9,7 +9,7 @@ import { sha256Hex, proposalIdFor, buildProvenance } from "../src/ai/provenance.
 import { parseFrontmatter, loadBundle } from "../src/core/bundle.js";
 import type { ProposalDraft, Provenance } from "../src/ai/types.js";
 
-const SCOPE = { repoRoot: "/tmp/kk-scope", surfaceRoot: "/tmp/kk-scope/bundle" };
+const SCOPE = { repoRoot: "/tmp/kk-scope", surfaceRoot: "/tmp/kk-scope/bundle", agent: "scribe" as const };
 
 const DRAFT: ProposalDraft = {
   id: "P-abc123def456",

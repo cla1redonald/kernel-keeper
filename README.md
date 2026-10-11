@@ -36,7 +36,7 @@ Needs Node 22 or later.
 
 1. **Clone.**
    ```bash
-   git clone https://github.com/cla1redonald/kernel-keeper-public && cd kernel-keeper-public
+   git clone https://github.com/cla1redonald/kernel-keeper && cd kernel-keeper
    ```
 2. **Build.**
    ```bash
@@ -104,7 +104,7 @@ Third-party plugins get shape checks only. Every check, its severities and the e
 
 ## What is tested
 
-- **322 tests in 21 files.** With the build in place and no API keys set, 316 run and 6 skip. The 6 patrol the real Northwind Money bundle from the companion repo and run when `TEAM_OS_PATH` points at a checkout. CI clones it, so all 322 run there.
+- **332 tests in 22 files.** With the build in place and no API keys set, 326 run and 6 skip. The 6 patrol the real Northwind Money bundle from the companion repo and run when `TEAM_OS_PATH` points at a checkout. CI clones it, so all 332 run there.
 - **Fault-seeded fixtures.** `tests/fixtures/governance-repo`, `mini-repo` and `estate` are built with known faults (dangling links, duplicate IDs, a superseded item with no replacement, an agent with no frontmatter) and the tests pin the exact findings the patrol must report, and no others. Verify tests plant damage after a baseline and assert it is caught.
 - **Prompts are inspectable before anything is spent.** `propose --dry-run` prints the exact prompts and makes zero API calls. Every proposal records a reproducible `prompt-sha256`, the evidence files and the reviewed-surface hashes, so `apply` refuses a proposal whose target has changed since it was drafted.
 - **Cost is visible and capped.** `propose` and `drift` print an input-token estimate before the first call. `mine` takes `--max-calls` (default 25) and aborts before spending if the run would need more.

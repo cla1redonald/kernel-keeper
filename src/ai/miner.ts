@@ -215,7 +215,7 @@ export async function runMine(corpusDir: string, bundlePath: string, opts: MineO
           .filter((x): x is { path: string; content: string } => x !== null),
         usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }, now,
       });
-      const w = writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot });
+      const w = writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot, agent: "gap-miner" });
       if (w.skipped) result.skippedExisting.push(w.path);
       else result.written.push(w.path);
       } catch (err) {
