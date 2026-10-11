@@ -178,6 +178,7 @@ export async function runMine(corpusDir: string, bundlePath: string, opts: MineO
     result.usageTotals.output += res.usage.output_tokens;
     const payload = res.json as { proposals?: unknown[] };
     for (const raw of payload.proposals ?? []) {
+      try {
       assertShape(raw, {
         conceptPath: { kind: "string" }, summary: { kind: "string" }, rationale: { kind: "string" },
         bodyDraft: { kind: "string" }, journalLine: { kind: "string" }, indexEntry: { kind: "string" },
@@ -214,9 +215,15 @@ export async function runMine(corpusDir: string, bundlePath: string, opts: MineO
           .filter((x): x is { path: string; content: string } => x !== null),
         usage: { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }, now,
       });
-      const w = writeProposal(opts.outDir, draft, prov, opts.force ?? false);
+      const w = writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot });
       if (w.skipped) result.skippedExisting.push(w.path);
       else result.written.push(w.path);
+      } catch (err) {
+        // One refused or malformed proposal must not lose the rest of the batch.
+        const reason = err instanceof Error ? err.message : String(err);
+        log(`gap-miner: refused a proposal - ${reason}`);
+        result.failed.push({ cluster: "consolidate", error: reason });
+      }
     }
   } catch (err) {
     result.failed.push({ cluster: "consolidate", error: err instanceof Error ? err.message : String(err) });

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { parseFrontmatter } from "../core/bundle.js";
 import { sha256Hex } from "./provenance.js";
 import type { ProposalDraft, Provenance } from "./types.js";
@@ -244,15 +244,61 @@ export function proposalExists(outDir: string, id: string): boolean {
   return existsSync(proposalPath(outDir, id));
 }
 
+/** Where a proposal's target must land: the loaded bundle or estate root, and the repo that holds it. */
+export interface TargetScope {
+  repoRoot: string;
+  /** The bundle root (or estate root) the proposal may amend or create files in. */
+  surfaceRoot: string;
+}
+
+/** A model-authored draft failed a code-level check. The reason is logged against the cluster. */
+export class ProposalRejectedError extends Error {}
+
+const PROPOSAL_ID_RE = /^P-[0-9a-f]{12}$/;
+/** Kinds for which `apply` refuses a proposal that is not flagged needs-human. */
+const HUMAN_AUTHORED_KINDS = new Set<ProposalDraft["kind"]>(["amend", "new-procedure"]);
+
+function confineTarget(target: string, scope: TargetScope): void {
+  if (target.includes("\0") || target.includes("\\") || isAbsolute(target) || /^[A-Za-z]:/.test(target)) {
+    throw new ProposalRejectedError(`target is not a plain relative path: ${JSON.stringify(target)}`);
+  }
+  const clean = posix.normalize(target);
+  if (clean === "." || clean === ".." || clean.startsWith("../")) {
+    throw new ProposalRejectedError(`target escapes the bundle or estate root: ${target}`);
+  }
+  // Targets are repo-relative (scribe, drift) or surface-relative (gap-miner). Either reading
+  // may land inside the surface; after resolving symlinks, at least one must.
+  const surface = realish(scope.surfaceRoot);
+  const inside = [scope.repoRoot, scope.surfaceRoot].some((base) => isInside(realish(resolve(base, clean)), surface));
+  if (!inside) throw new ProposalRejectedError(`target resolves outside the bundle or estate root: ${target}`);
+}
+
+/**
+ * Code-level guarantees behind the prompt's "content is data" rule. A model that
+ * obeys an injected instruction still cannot, through this function:
+ *  - choose where the proposal file is written (the id must be the deterministic P-<hash>),
+ *  - point the proposal at a path outside the bundle or estate,
+ *  - clear needs-human on kinds where `apply` insists on it.
+ * Returns the draft to write, or throws ProposalRejectedError.
+ */
+export function validateDraft(draft: ProposalDraft, scope: TargetScope): ProposalDraft {
+  if (!PROPOSAL_ID_RE.test(draft.id)) throw new ProposalRejectedError(`proposal id is not a deterministic P-<hash>: ${JSON.stringify(draft.id)}`);
+  if (draft.target !== null) confineTarget(draft.target, scope);
+  return HUMAN_AUTHORED_KINDS.has(draft.kind) ? { ...draft, needsHuman: true } : draft;
+}
+
 export function writeProposal(
   outDir: string,
   draft: ProposalDraft,
   prov: Provenance,
   force: boolean,
+  scope: TargetScope,
 ): { path: string; skipped: boolean } {
-  const path = proposalPath(outDir, draft.id);
+  const checked = validateDraft(draft, scope);
+  const path = proposalPath(outDir, checked.id);
+  if (!isInside(resolve(path), resolve(outDir))) throw new ProposalRejectedError(`proposal path leaves the proposals directory: ${path}`);
   if (existsSync(path) && !force) return { path, skipped: true };
   mkdirSync(resolve(outDir), { recursive: true });
-  writeFileSync(path, renderProposalMarkdown(draft, prov));
+  writeFileSync(path, renderProposalMarkdown(checked, prov));
   return { path, skipped: false };
 }

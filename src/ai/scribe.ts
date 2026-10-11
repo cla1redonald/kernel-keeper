@@ -121,10 +121,19 @@ export async function runScribe(bundlePath: string, opts: ScribeOptions): Promis
       journalLine: string; indexEntry: string | null; confidence: Confidence;
       evidenceQuotes: { file: string; quote: string }[]; needsHuman: boolean;
     };
+    // Fields are listed explicitly, never spread from the model's reply: an extra `id`,
+    // `target` or `checks` key in the JSON must not be able to override the deterministic ones.
     const draft: ProposalDraft = {
       id: p.id,
       target: p.cluster.file,
-      ...r,
+      kind: r.kind,
+      summary: r.summary,
+      rationale: r.rationale,
+      bodyDraft: r.bodyDraft,
+      indexEntry: r.indexEntry,
+      confidence: r.confidence,
+      evidenceQuotes: r.evidenceQuotes,
+      needsHuman: r.needsHuman,
       frontmatterPatch: r.frontmatterPatch
         ? Object.fromEntries(r.frontmatterPatch.map((kv) => [kv.key, kv.value]))
         : null,
@@ -138,7 +147,7 @@ export async function runScribe(bundlePath: string, opts: ScribeOptions): Promis
     });
     result.usageTotals.input += res.usage.input_tokens;
     result.usageTotals.output += res.usage.output_tokens;
-    return writeProposal(opts.outDir, draft, prov, opts.force ?? false);
+    return writeProposal(opts.outDir, draft, prov, opts.force ?? false, { repoRoot: bundle.repoRoot, surfaceRoot: bundleRoot });
   }));
 
   settled.forEach((s, i) => {
