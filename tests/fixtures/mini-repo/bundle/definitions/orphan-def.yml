@@ -1,0 +1,5 @@
+metric:
+  name: orphan
+  meta:
+    owner: data-team
+    concept: /metrics/gone.md

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+patrol-report.md
+.DS_Store
+.env
+.env.*
+!.env.example
+**/.kernel-keeper/notion-sync.json

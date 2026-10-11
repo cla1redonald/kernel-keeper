@@ -1,0 +1,5 @@
+metric:
+  name: good_metric
+  meta:
+    owner: platform-team
+    concept: /metrics/good-metric.md

@@ -1,0 +1,2 @@
+# retired endpoints
+mcp__gamma__generate_gamma

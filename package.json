@@ -1,0 +1,35 @@
+{
+  "name": "kernel-keeper",
+  "version": "0.12.0",
+  "description": "Patrols a team's markdown memory and the skills and agents that act on it. AI drafts the fix, a human elects it, a deterministic clerk applies it.",
+  "license": "MIT",
+  "author": "Claire Donald",
+  "type": "module",
+  "bin": {
+    "kernel-keeper": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "tests/fixtures/northwind-memory-lab",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cla1redonald/kernel-keeper-public.git"
+  }
+}

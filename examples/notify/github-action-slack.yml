@@ -1,0 +1,36 @@
+# Patrol + Slack notification (incoming webhook).
+# Secrets needed: SLACK_WEBHOOK_URL (Slack app → Incoming Webhooks).
+name: kernel patrol → slack
+on:
+  schedule: [{ cron: "0 7 * * 1" }]
+  pull_request: { paths: ["bundle/**"] }
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: build kernel-keeper
+        run: |
+          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper-public "$RUNNER_TEMP/kernel-keeper"
+          npm ci --prefix "$RUNNER_TEMP/kernel-keeper"
+          npm run build --prefix "$RUNNER_TEMP/kernel-keeper"
+      - id: patrol
+        run: |
+          node "$RUNNER_TEMP/kernel-keeper/dist/cli.js" . --out patrol-report.md --quiet | tee summary.txt
+          echo "summary=$(cat summary.txt)" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: patrol-report, path: patrol-report.md }
+      - name: notify slack
+        if: always()
+        run: |
+          curl -fsS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg t "🛡️ $PATROL_SUMMARY - report in the run artifacts: $RUN_URL" '{text: $t}')"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          PATROL_SUMMARY: ${{ steps.patrol.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

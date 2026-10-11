@@ -1,0 +1,41 @@
+# Patrol + Microsoft Teams notification (Workflows incoming webhook).
+# Secrets needed: TEAMS_WEBHOOK_URL (Teams channel → Workflows → "Post to a channel when a webhook request is received").
+name: kernel patrol → teams
+on:
+  schedule: [{ cron: "0 7 * * 1" }]
+  pull_request: { paths: ["bundle/**"] }
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: build kernel-keeper
+        run: |
+          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper-public "$RUNNER_TEMP/kernel-keeper"
+          npm ci --prefix "$RUNNER_TEMP/kernel-keeper"
+          npm run build --prefix "$RUNNER_TEMP/kernel-keeper"
+      - id: patrol
+        run: |
+          node "$RUNNER_TEMP/kernel-keeper/dist/cli.js" . --out patrol-report.md --quiet | tee summary.txt
+          echo "summary=$(cat summary.txt)" >> "$GITHUB_OUTPUT"
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: patrol-report, path: patrol-report.md }
+      - name: notify teams (adaptive card)
+        if: always()
+        run: |
+          jq -n --arg s "$PATROL_SUMMARY" \
+                --arg u "$RUN_URL" '
+            {type:"message", attachments:[{contentType:"application/vnd.microsoft.card.adaptive", content:{
+              "$schema":"http://adaptivecards.io/schemas/adaptive-card.json", type:"AdaptiveCard", version:"1.4",
+              body:[{type:"TextBlock", text:"🛡️ Kernel patrol", weight:"Bolder"},
+                    {type:"TextBlock", text:$s, wrap:true}],
+              actions:[{type:"Action.OpenUrl", title:"Open report", url:$u}]}}]}' \
+          | curl -fsS -X POST "$TEAMS_WEBHOOK_URL" -H 'Content-Type: application/json' -d @-
+        env:
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          PATROL_SUMMARY: ${{ steps.patrol.outputs.summary }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

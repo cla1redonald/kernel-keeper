@@ -1,0 +1,24 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # The integration tests patrol the real Northwind Money bundle from the public
+      # companion repo. Without TEAM_OS_PATH they skip, so clone it and set the variable.
+      - name: clone team-os (integration fixture)
+        run: |
+          git clone --depth 1 https://github.com/cla1redonald/team-os "$RUNNER_TEMP/team-os"
+          echo "TEAM_OS_PATH=$RUNNER_TEMP/team-os" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx vitest run

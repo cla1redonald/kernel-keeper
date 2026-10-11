@@ -1,0 +1,32 @@
+# Patrol + email notification. Only sends when the patrol finds something (exit != 0).
+# Secrets needed: MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_TO.
+name: kernel patrol → email
+on:
+  schedule: [{ cron: "0 7 * * 1" }]
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: build kernel-keeper
+        run: |
+          git clone --depth 1 https://github.com/cla1redonald/kernel-keeper-public "$RUNNER_TEMP/kernel-keeper"
+          npm ci --prefix "$RUNNER_TEMP/kernel-keeper"
+          npm run build --prefix "$RUNNER_TEMP/kernel-keeper"
+      - id: patrol
+        run: node "$RUNNER_TEMP/kernel-keeper/dist/cli.js" . --out patrol-report.md --quiet
+        continue-on-error: true
+      - name: email the digest
+        if: steps.patrol.outcome == 'failure'   # findings at/above threshold
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          to: ${{ secrets.MAIL_TO }}
+          from: kernel-keeper patrol
+          subject: "🛡️ Kernel patrol: findings need affirm-or-amend"
+          body: file://patrol-report.md

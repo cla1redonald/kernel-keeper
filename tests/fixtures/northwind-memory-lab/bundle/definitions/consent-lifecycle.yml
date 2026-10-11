@@ -1,0 +1,5 @@
+metric:
+  name: consent_recovery_rate
+  meta:
+    owner: data-ops
+    concept: /facts/consent-lifecycle.md
