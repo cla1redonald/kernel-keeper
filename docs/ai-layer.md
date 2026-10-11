@@ -13,7 +13,7 @@ node dist/cli.js mine <notes-dir> --bundle <bundle> --out-dir proposals/ # the G
 node dist/cli.js drift <bundle-or-estate> --out-dir proposals/           # the Drift Reviewer
 node dist/cli.js apply <bundle-or-estate> --proposals proposals/         # the Clerk (dry-run by default; --write applies)
 node dist/cli.js verify <bundle-or-estate> --baseline baseline.json      # the Damage Meter
-node dist/cli.js glass <bundle-or-estate> --proposals proposals/         # the Glass review console
+node dist/cli.js glass <bundle-or-estate> --proposals proposals/ --by "Your Name" # the Glass review console
 node dist/cli.js glass-demo                                              # seeded Glass demo
 ```
 
@@ -26,6 +26,17 @@ node dist/cli.js glass-demo                                              # seede
 - **The Damage Meter** (`verify`) compares the current governed surface with a prior baseline JSON. It can run explicit no-shell `--generator` commands before the snapshot, then reports missing registered items, changed content, newly unresolvable evidence or path references, archived items that lost retrieval continuity, new items and the damage fraction. `--damage-threshold` controls when it exits `1`; the default is zero tolerance.
 - **The Glass** (`glass`) starts a local browser review console over the same engine: review queue, proposal inbox, approve, reject and request-edit controls, deterministic apply preview, explicit write, and audit history. It gives a business reviewer a readable surface without Markdown, CLI or Git. New-procedure proposals render as promotion moments. See [demo/glass-demo-script.md](demo/glass-demo-script.md).
 - **The seeded demo** (`glass-demo`) copies the Northwind memory lab into a temp folder, starts Glass against the command estate and loads the procedure-promotion proposal. It is the quickest path through scan, proposal, approve, apply and audit.
+
+## Glass security model
+
+Glass can write files (decisions and, through the Clerk, applied changes), so it is built to be driven only by the person sitting at the machine.
+
+- **One source per server.** `root`, `register`, `memory` and `proposals` are fixed by the `glass` command line. Pages and forms never carry them, and a request that names a different `root`, `proposals`, `register` or `memory` gets `400`. To review another source, start another server.
+- **Loopback only.** `--host` must be `127.0.0.1`, `localhost` or `::1`. Glass has no login.
+- **Host and Origin.** Every request must carry a `Host` of `127.0.0.1:<port>` or `localhost:<port>` (this defeats DNS rebinding). A request with an `Origin` header must carry the server's own origin. Requests with no `Origin`, such as `curl`, are accepted. Anything else gets `403`.
+- **CSRF token.** A random token is generated at startup and embedded in every POST form the server renders. A POST without it gets `403`. The token is never put in a URL.
+- **Reviewer.** Elections are signed by the reviewer fixed at startup: `--by`, else `KERNEL_KEEPER_REVIEWER`, else `git config user.name`, else `reviewer`. The page shows it as a read-only field, and a posted `by` is ignored.
+- **Browser headers.** Pages are sent with a CSP that allows no scripts and no framing, plus `X-Frame-Options: DENY` and `Cache-Control: no-store`.
 
 ## Procedure promotion
 
