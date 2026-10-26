@@ -2,19 +2,19 @@
 
 *Design note. This records why the feature is shaped the way it is, and was written while it was being built. The current behaviour is described in [../checks.md](../checks.md), [../memory-doctrine.md](../memory-doctrine.md) and [../ai-layer.md](../ai-layer.md); version numbers refer to [CHANGELOG.md](../../CHANGELOG.md).*
 
-Status: v0.8 shipped safe write mode for eligible elected amendments. The follow-up richer-shape slices shipped deterministic bundle index insertion, new-concept creation, estate audit history, and governed new-procedure creation for authored skills, agents, and commands.
+Status: v0.8 added a safe write mode for elected amendments that pass the eligibility checks. Later releases added index entries in bundles, creation of new concepts, an audit history for estates, and creation of new skills, agents and commands in the authored part of an estate, each under the same rules.
 
 ## Goal
 
-Close the governance loop with a deterministic clerk:
+Finish the loop with a clerk, which is plain code with no AI in it:
 
 ```bash
 kernel-keeper apply <bundle-or-estate-root> --proposals DIR
 ```
 
-Agents still only draft proposals. Humans elect proposals. `apply` reads elected proposal files, verifies they still match the reviewed surface, prints or applies a deterministic diff, and refuses anything ambiguous or stale.
+Agents still only draft proposals, and people still decide which ones to elect. `apply` reads the elected proposal files and checks that each one still matches what the reviewer saw. It then prints the diff, or applies it, and refuses anything ambiguous or stale.
 
-The product reason is the same constitution as the rest of Kernel Keeper: repeated insight should be promotable into reusable behaviour, but only through a human election and deterministic clerk. This lets a team show "we learned this pattern" becoming a skill/agent/command without turning the agent into an unsupervised installer.
+The product reason follows the rule that runs through the rest of Kernel Keeper. Something a team keeps learning should be able to become a skill, agent or command that agents reuse, but only after a person has elected it and the clerk has applied it. That lets a team show a lesson turning into behaviour without letting an agent install things nobody has checked.
 
 ## Scope
 

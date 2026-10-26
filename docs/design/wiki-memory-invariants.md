@@ -4,35 +4,35 @@
 
 ## Source Inspiration
 
-Fabijan Bajo's "Agent Memory Wants a Wiki, Not a Vector Store" sharpens a direction Kernel Keeper already has: memory should be a readable, linked, dated register. Retrieval is cheap index first, then a few full pages. Trust comes from claims with receipts, visible supersession, and consolidation paid at write time instead of fuzzy retrieval paid at every query.
+Fabijan Bajo's "Agent Memory Wants a Wiki, Not a Vector Store" makes the case for something Kernel Keeper was already heading towards. Memory should be a register that people can read, with links and dates. An agent reads a cheap index first and then a few full pages. You trust a page because its claims cite their sources and anything replaced is visibly marked, and because the work of tidying memory is done once, when it is written, instead of at every query through fuzzy retrieval.
 
-Argus and Bruce Stephenson's "What Breaks When You Run Agent Memory" adds the operating failure modes: derived artifacts masquerading as source, archive-by-moving becoming deletion, success exits that prove nothing, multiple canonical stores, indexes that bypass access boundaries, and the absence of integrity monitors. Kernel Keeper should absorb those as memory-governance checks: verify effects, distinguish source from cache, make archive a state, and govern every derived copy.
+Argus and Bruce Stephenson's "What Breaks When You Run Agent Memory" describes what goes wrong once memory is in use. Generated files get treated as the source. Archiving by moving a file turns into deleting it. A job exits successfully and proves nothing. Two stores both claim to be the record, indexes step around access boundaries, and nothing checks integrity at all.
 
-Kernel Keeper should absorb that as patrolable invariants, not as a vector-search feature.
+Kernel Keeper should take both articles on board as rules the patrol can check, rather than by adding vector search. That means checking that maintenance had the effect it claimed, telling source apart from cache, treating archive as a state, and holding every derived copy to the same rules as its source.
 
 ## Doctrine
 
-The doctrine is deliberately small:
+The doctrine is deliberately small.
 
-- Canonical memory is readable markdown in the governed surface.
-- Retrieval starts with an index, then reads full pages.
-- Every derived representation is a cache with provenance, not a second source of truth.
-- Archive is a lifecycle state, not disappearance.
-- Successful maintenance means the register still verifies, not merely that a command returned `0`.
-- AI can draft proposals, but deterministic checks decide what is eligible for a human to sign or a clerk to apply.
+- The record is readable markdown inside the files Kernel Keeper governs.
+- An agent starts with the index and then reads full pages.
+- Anything derived from the record is a cache that says where it came from. It is never a second record.
+- An archived page is still there, marked as archived.
+- Maintenance has succeeded when the register still passes `verify`. A command returning `0` is not enough.
+- AI can draft proposals. Fixed checks, not the AI, decide which proposals are eligible for a person to sign or the clerk to apply.
 
 ## Goal
 
-Make Kernel Keeper explicitly protect wiki-memory quality:
+Make Kernel Keeper protect the quality of wiki memory directly, so that:
 
-- `index.md` is the cheap first read, not just a list of links.
+- `index.md` is the cheap first read, with enough description to be useful on its own.
 - Concept pages say what is currently believed, when it was affirmed, and why.
 - Claims can carry source receipts.
 - Superseded claims stay visible with pointers to replacements.
-- Raw/source evidence can be governed separately from synthesized concepts.
-- Derived artifacts are treated as caches, never canonical source.
-- Archive is a lifecycle state, not a move out of the read path.
-- Memory upkeep is verified by effect checks, not command success.
+- Raw and source evidence can be governed separately from synthesised concepts.
+- Derived artefacts are treated as caches, never canonical source.
+- Archive is a lifecycle state, and archived pages stay where agents can still read them.
+- Upkeep is judged by checking its effect on the register, rather than by whether a command succeeded.
 - Any search/index/cache copy obeys the same boundaries as the source register.
 
 ## Non-Goals
@@ -54,7 +54,7 @@ Every concept linked from `index.md` should have a one-line description in the l
 - [Consent lifecycle](/processes/consent-lifecycle.md) - how consent state changes from connection through revocation.
 ```
 
-This makes `index.md` the cheap retrieval layer: one read tells an agent what exists and where to drill down.
+With that in place, `index.md` does the job of a cheap retrieval layer. One read tells an agent what exists and which page to open next.
 
 ### Dated Overview
 
@@ -108,9 +108,9 @@ bundle/
   raw/
 ```
 
-Source files are not necessarily concepts. They are evidence. Patrol should distinguish "not indexed" from "not meant to be indexed."
+Source files are evidence, and need not be concepts. The patrol should be able to tell a file that is missing from the index from one that was never meant to be in it.
 
-### Derived Artifacts
+### Derived Artefacts
 
 Generated files should say they are generated and where they come from:
 
@@ -120,9 +120,9 @@ generated-at: 2026-07-20T09:00:00Z
 artifact-kind: cache
 ```
 
-Derived artifacts should never be used as the only source of truth. If an artifact cannot be regenerated from checked-in source files, it is not a cache; it is source and should be governed like source.
+A derived artefact should never be the only source of truth. If it cannot be regenerated from source files in the repo, then it is really source, and it should be governed as source.
 
-Multiple canonical stores are a patrol smell. If both a markdown page and a generated JSON/search/index copy claim to be authoritative, Kernel Keeper should make one of them declare itself as derived or report the ambiguity.
+Two stores that both claim to be the record are worth a finding. If a markdown page and a generated JSON, search or index copy both claim to be authoritative, Kernel Keeper should make one of them declare itself derived, or report the conflict.
 
 ### Archive State
 
@@ -134,7 +134,7 @@ archived-at: 2026-07-20
 archive-note: Replaced by the consolidated consent lifecycle concept.
 ```
 
-Moving a file to `archive/` may be a storage convention, but it must not be the only signal. A patrol must be able to distinguish "de-emphasized" from "invisible."
+Moving a file to `archive/` can be a storage convention, but it must not be the only signal. The patrol has to be able to tell a page that has been played down from one that can no longer be found.
 
 ### Compartment Hints
 
@@ -151,7 +151,7 @@ compartment: restricted
 redacted-view: facts/customer-research-redacted.md
 ```
 
-The immediate value is not enforcement. It is avoiding accidental flattening: if a future index, search cache, or export includes restricted material without carrying the compartment label, patrol should be able to flag it.
+For now the point is to stop labels being lost by accident, and enforcement can come later. If a future index, search cache or export includes restricted material without its compartment label, the patrol should be able to flag it.
 
 ### Recall Logs
 
@@ -161,7 +161,7 @@ Longer term, agent memory should leave enough retrieval evidence for patrol to l
 retrieval-log: logs/recall/2026-07-20.md
 ```
 
-This is not an analytics feature in the first batch. It is a future hook for checking that the cheap index actually routes agents to the pages they need, and for finding important pages that are never retrieved.
+The first batch does not include analytics. The log is there so that, later, the patrol can check whether the index really sends agents to the pages they need, and find important pages that are never read.
 
 ## Implementation Batch
 
@@ -190,7 +190,7 @@ Findings:
 - LOW: duplicate or near-empty index descriptions.
 - MED: index link text is only a filename-like label when the target title/description would be more informative.
 
-Rules should be deterministic and conservative. This check should not become a prose-quality critic.
+The rules should be fixed and cautious. This check is not meant to judge the quality of anyone's writing.
 
 ### Phase 3: Dated Overview Check
 
@@ -219,7 +219,7 @@ claim-receipts
 Initial deterministic scope:
 
 - Only inspect markdown bullets in meaning concepts.
-- Recognize `[source: path]`, `[source: path#anchor]`, and `[source: path@timestamp]`.
+- Recognise `[source: path]`, `[source: path#anchor]`, and `[source: path@timestamp]`.
 - Resolve local source paths using existing bundle link semantics.
 - Ignore external URLs in v1.
 
@@ -239,7 +239,7 @@ Teach patrol that `sources/` and `raw/` files are evidence files:
 - They can be referenced by drift and claim receipt checks.
 - They can have optional frontmatter, but should not require concept `type:`.
 
-This prevents raw evidence from becoming a noise storm while still letting Kernel Keeper validate references into it.
+That stops raw evidence from flooding the report with findings, while Kernel Keeper can still check references into it.
 
 ### Phase 6: Drift Integration
 
@@ -250,9 +250,9 @@ Extend `kernel-keeper drift` job construction:
 - Include receipt paths in proposal evidence.
 - Label proposals with relevant checks, for example `checks: [semantic-drift, claim-receipts]` when drift arises from sourced claims.
 
-### Phase 7: Derived Artifact Integrity
+### Phase 7: Derived Artefact Integrity
 
-Add checks that protect the "source vs cache" boundary:
+Add checks that keep source and cache apart:
 
 ```text
 derived-artifacts
@@ -260,12 +260,12 @@ derived-artifacts
 
 Findings:
 
-- MED: generated artifact lacks `generated-from:` or equivalent provenance.
-- MED: generated artifact points at a missing source.
-- HIGH: a configured loader reads from a generated artifact when the source files are present.
-- HIGH: a generated artifact is newer than source but cannot be regenerated by any documented command.
+- MED: generated artefact lacks `generated-from:` or equivalent provenance.
+- MED: generated artefact points at a missing source.
+- HIGH: a configured loader reads from a generated artefact when the source files are present.
+- HIGH: a generated artefact is newer than source but cannot be regenerated by any documented command.
 
-This is the Kernel Keeper version of "derived is cache, never food."
+Put simply, a derived file is a cache, and it must never be fed back in as if it were source.
 
 ### Phase 8: Archive State Check
 
@@ -287,7 +287,7 @@ Findings:
 - MED: item lives under an `archive/` path but has no archive lifecycle metadata.
 - HIGH: archived item is removed from all indexes and has no replacement or retrieval path.
 
-This makes archive a governed state, not accidental de-indexing.
+This makes archiving a deliberate, governed state, so a page cannot drop out of the index by accident.
 
 ### Phase 9: Effect Verification and Damage Meter
 
@@ -312,16 +312,16 @@ Checks:
 - Measure a "damage fraction": changed, missing, or newly unresolvable registered items divided by prior registered items.
 - Refuse or exit non-zero when damage exceeds a configured threshold.
 
-This should be deterministic. A successful exit from a generator is not evidence; the register surviving the generator is evidence.
+This should be deterministic. A generator exiting with `0` proves nothing by itself. The evidence is that the register still checks out after the generator has run.
 
-The verification report should make the damage fraction visible even when it is below the failure threshold. A quiet slow drift is still useful evidence for the next patrol policy change.
+The verification report should show the damage fraction even when it is below the failure threshold. Slow damage that never trips the threshold is still worth knowing about when the patrol policy is next reviewed.
 
 ### Phase 10: Compartment-Aware Index/Export Checks
 
 Shipped in v0.9e for memory mode:
 
 - `compartment:` activates the check.
-- Public generated copies are generated/cache/index/export artifacts marked `visibility: public` or `audience: public`.
+- Public generated copies are generated/cache/index/export artefacts marked `visibility: public` or `audience: public`.
 - `redacted-view:` must point at a known local safe file.
 
 Prepare for future index/search/export copies by checking boundary metadata:
@@ -336,7 +336,7 @@ Findings:
 - MED: generated index/export omits compartment labels from included items.
 - HIGH: redacted view points at no known safe file.
 
-This does not require Kernel Keeper to enforce access control. It only ensures derived copies do not silently erase the boundary.
+Kernel Keeper does not need to enforce access control for this. It only has to make sure derived copies do not quietly drop the boundary.
 
 ### Phase 11: Recall Evidence
 
@@ -351,10 +351,10 @@ recall-evidence
 Findings:
 
 - LOW: indexed concept is never retrieved across a configured recall-log window.
-- LOW: repeated searches land on a derived artifact when a source concept is available.
+- LOW: repeated searches land on a derived artefact when a source concept is available.
 - MED: recall log references a file that no longer exists.
 
-This should stay optional. The first goal is memory integrity, not instrumentation.
+This should stay optional. Keeping memory intact matters more than measuring how it is used.
 
 ## Test Plan
 
@@ -369,8 +369,8 @@ Unit tests:
 - External source receipts are skipped in v1.
 - `sources/` and `raw/` files do not create index-coverage findings.
 - Retired items stay quiet for overview and receipt noise.
-- Generated artifact with `generated-from:` pointing at an existing source is quiet.
-- Generated artifact with missing provenance produces MED.
+- Generated artefact with `generated-from:` pointing at an existing source is quiet.
+- Generated artefact with missing provenance produces MED.
 - File under `archive/` without archive lifecycle metadata produces MED.
 - `status: archived` item with an archive note remains discoverable and does not create ownerless/staleness noise.
 - Restricted item included in a public generated index/export produces MED.
@@ -382,7 +382,7 @@ Integration tests:
 - A fixture bundle with concepts plus `sources/` produces zero findings.
 - A fixture bundle with missing receipts, broken source paths, and weak index descriptions produces deterministic LOW/MED findings.
 - Drift jobs include claim receipt source files.
-- Rebuild/verify fixture exits non-zero when a generated artifact drops registered items.
+- Rebuild/verify fixture exits non-zero when a generated artefact drops registered items.
 - Compartment fixture proves boundary metadata is preserved in generated index/export checks.
 
 Regression:
@@ -420,7 +420,7 @@ Fetched-source cache reuse is explicit: `--fetch-cache-max-age-hours <n>` reuses
 - Should raw/source files support line anchors only, or also timestamp anchors as opaque text?
 - Should source-layer files be allowed outside `bundle/` but inside repo root, matching current link resolution?
 - Should `mine` generate claim receipts when evidence quotes come from notes?
-- What names should Kernel Keeper use for generated artifact metadata: `generated-from:` and `artifact-kind: cache`, or something closer to existing provenance frontmatter?
+- What names should Kernel Keeper use for generated artefact metadata: `generated-from:` and `artifact-kind: cache`, or something closer to existing provenance frontmatter?
 - What damage-fraction threshold should block a rebuild by default?
 - Should compartment checks be always-on, or only active when any item declares `compartment:`?
 - What recall-log format is useful without turning Kernel Keeper into an analytics system?
