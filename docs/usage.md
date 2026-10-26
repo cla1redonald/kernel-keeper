@@ -1,6 +1,6 @@
 # Usage
 
-Everything here assumes a local build:
+These examples assume you have built Kernel Keeper locally.
 
 ```bash
 git clone https://github.com/cla1redonald/kernel-keeper && cd kernel-keeper
@@ -16,11 +16,11 @@ node dist/cli.js . --memory                 # opt into the wiki-memory checks
 node dist/cli.js ~/.claude --register estate # skills, agents, commands and plugins
 ```
 
-Exit codes and flags are in [checks.md](checks.md).
+The exit codes and every flag are listed in [checks.md](checks.md).
 
 ## Snapshot and verify
 
-Snapshot a surface before generated maintenance work, then verify it afterwards:
+Before a generator or other automated job does maintenance on a register, take a snapshot of it. When the job has finished, compare the register with the snapshot.
 
 ```bash
 node dist/cli.js verify . --write-baseline .kernel-keeper-baseline.json
@@ -29,7 +29,7 @@ node dist/cli.js verify . --baseline .kernel-keeper-baseline.json --damage-thres
 
 ## CI recipe (GitHub Actions)
 
-A weekly scheduled run is the patrol. A per-PR run on `bundle/**` is the gate. The job builds Kernel Keeper outside the workspace so the patrol does not walk its own tooling.
+This workflow runs the patrol every Monday morning, and runs it again as a gate on any pull request that touches `bundle/**`. It builds Kernel Keeper in a folder outside the workspace, so the patrol does not walk over Kernel Keeper's own files.
 
 ```yaml
 name: kernel patrol
@@ -54,16 +54,16 @@ jobs:
         with: { name: patrol-report, path: patrol-report.md }
 ```
 
-For a skills repo, use the same job with `--register skills --fail-on high`. HIGH there means an agent will hit a dead end mid-run, which is worth failing a build over.
+For a skills repo, use the same job with `--register skills --fail-on high`. In a skills repo a HIGH finding means an agent will hit a dead end partway through a run, which is a fair reason to fail the build.
 
 ## Notifications (optional)
 
-The keeper never notifies. It reports and exits; delivery is your scheduler's job. Copy-paste recipes live in [`examples/notify/`](../examples/notify/):
+Kernel Keeper does not send notifications. It writes its report and exits, and passing the result on is the job of whatever runs it on a schedule. There are recipes you can copy in [`examples/notify/`](../examples/notify/).
 
-- **Slack:** `github-action-slack.yml` posts the one-line summary via an incoming webhook, with the report attached to the run.
-- **Microsoft Teams:** `github-action-teams.yml` does the same as an Adaptive Card via a Teams Workflows webhook.
-- **Email:** `github-action-email.yml` mails the full digest, only when the patrol finds something.
-- **Local schedulers:** `local-notify.sh` wraps a patrol for cron, launchd or hooks. Opt into any channel with `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `PATROL_MAIL_TO` or `PATROL_MACOS_NOTIFY=1`, and point `KERNEL_KEEPER_CLI` at `dist/cli.js`.
+- `github-action-slack.yml` posts the one-line summary to Slack through an incoming webhook and attaches the report to the run.
+- `github-action-teams.yml` does the same for Microsoft Teams, as an Adaptive Card sent through a Teams Workflows webhook.
+- `github-action-email.yml` emails the full digest, and only does so when the patrol finds something.
+- `local-notify.sh` wraps a patrol for cron, launchd or hooks on your own machine. Turn on whichever channels you want with `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, `PATROL_MAIL_TO` or `PATROL_MACOS_NOTIFY=1`, and point `KERNEL_KEEPER_CLI` at `dist/cli.js`.
 
 ## Library use
 
@@ -73,13 +73,13 @@ const result = patrol("path/to/repo", { policyDays: 90, journalDays: 30 });
 console.log(renderMarkdown(result, "my-kernel", new Date()));
 ```
 
-For richer frontmatter, pass `{ frontmatterParser: "yaml" }` to `patrol`, `patrolEstate`, `loadBundle` or `loadEstate`, or use `--frontmatter-parser yaml` on the CLI. Install the optional `yaml` package only if your register needs multiline scalars, anchors, flow collections or nested frontmatter.
+For richer frontmatter, pass `{ frontmatterParser: "yaml" }` to `patrol`, `patrolEstate`, `loadBundle` or `loadEstate`, or use `--frontmatter-parser yaml` on the CLI. You only need to install the optional `yaml` package if your register uses multiline scalars, anchors, flow collections or nested frontmatter.
 
 ## Boundaries in detail
 
-- **Symlinks are never followed**, in either walker. A symlinked file or directory is skipped, including a symlinked `SKILL.md` inside a plugin cache, which is treated as missing rather than read through. A link could point outside the repo or create a cycle, and a patrol must never ingest what the register does not contain.
-- **Plugin walking is depth-bounded** (6 levels). A plugin whose skills or commands sit deeper is reported as a shapeless plugin (`plugin-shape`, LOW) rather than walked indefinitely.
-- **Estate load failures exit `66`** (`No estate found`, `No such path`), the same as bundle load failures.
-- **Only YAML under a `definitions/` folder is a governed definition**, so stray linter or editor configs elsewhere do not generate pointer-integrity findings.
-- **Link targets are percent-decoded.** `my%20file.md` resolves to `my file.md`. A real filename containing literal `%XX`-shaped text will be mis-resolved, so avoid `%` in concept filenames.
-- **Frontmatter parsing is simple by default**, and full YAML is opt-in. See [memory-doctrine.md](memory-doctrine.md).
+- Neither walker follows symlinks. A symlinked file or directory is skipped. That includes a symlinked `SKILL.md` inside a plugin cache, which is treated as missing rather than read through. A link could point outside the repo or create a loop, and the patrol must never take in anything the register does not itself contain.
+- Plugins are walked to a depth of 6 levels. If a plugin keeps its skills or commands deeper than that, it is reported as a plugin with no recognisable shape (`plugin-shape`, LOW) instead of being walked further.
+- If an estate cannot be loaded (`No estate found`, `No such path`), the exit code is `66`, the same as for a bundle.
+- Only YAML files under a `definitions/` folder count as governed definitions. Linter or editor config files elsewhere in the repo do not produce pointer-integrity findings.
+- Link targets are percent-decoded, so `my%20file.md` resolves to `my file.md`. A real filename that contains text shaped like `%XX` will be resolved to the wrong file, so keep `%` out of concept filenames.
+- Frontmatter is read with a simple parser by default, and full YAML is something you opt into. See [memory-doctrine.md](memory-doctrine.md).
