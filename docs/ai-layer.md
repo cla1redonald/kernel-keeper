@@ -27,17 +27,17 @@ The Gap-Miner works through a folder of working notes in batches and drafts prop
 
 ### The Drift Reviewer (`drift`)
 
-The Drift Reviewer compares each item in the register with the local text files it refers to (`.md`, `.yml`, `.yaml`, `.json`, `.csv`, `.txt`), and drafts a proposal wherever the item and its sources no longer say the same thing. With `--memory`, it uses valid `[source: ...]` receipts and `source:` frontmatter as evidence before it looks at ordinary links.
+The Drift Reviewer compares each item in the register with the local text files it refers to (`.md`, `.yml`, `.yaml`, `.json`, `.csv`, `.txt`), and drafts a proposal wherever the item and its sources no longer say the same thing. With `--memory`, it uses valid `[source: ...]` receipts and `source:` frontmatter as evidence, and only falls back to ordinary links when a page has none.
 
 It skips external sources unless you pass `--fetch-sources`. That fetches only the HTTP(S) addresses declared in `source:` frontmatter, and caches text responses under `.kernel-keeper/drift-cache/`. Add `--fetch-cache-max-age-hours <n>` to reuse cached files that are newer than that. Without it, every fetch goes to the network. Every drift proposal is marked `needs-human: true` and carries `checks: [semantic-drift]`.
 
 ### The Clerk (`apply`)
 
-The Clerk shows, or writes, the exact changes for proposal files that a person has elected. It only shows them unless you pass `--write`, and then it applies only the eligible ones.
+The Clerk shows, or writes, the exact changes for proposal files that a person has elected. By default it only shows them. With `--write` it applies the eligible ones.
 
 An amend proposal can patch the frontmatter and body of a page and add a line to the bundle journal. A new-concept proposal can create a complete file with frontmatter, add an entry to `index.md` and add the journal line, and those three changes are written together or not at all. A new-procedure proposal can create a skill, agent or command in the part of the estate your organisation writes.
 
-When the Clerk writes to a procedure estate, it also adds a line to `.kernel-keeper/audit/<mode>-log.md` by default, so every change to a skill, agent or command has a record of who elected it. You can turn that off with `--no-audit-log`, but only by asking for it.
+When the Clerk writes to a procedure estate, it also adds a line to `.kernel-keeper/audit/<mode>-log.md` by default, so every change to a skill, agent or command has a record of who elected it. Passing `--no-audit-log` turns it off.
 
 To be applied, a proposal needs a real election by a person (`elected: true`, `status: elected` or a ticked Elect box), provenance that includes hashes of what the reviewer saw, a text file as its target, and evidence files that still exist. A proposal that is stale, ambiguous, of an unsupported kind, aimed at a third-party plugin or already applied is refused or skipped before anything is written.
 
@@ -68,7 +68,7 @@ Glass writes files. It records decisions and, through the Clerk, applies changes
 
 A proposal with `kind: new-procedure` may create `skills/<name>/SKILL.md`, `agents/<name>.md` or `commands/<name>.md`, and nothing else. The rules are deliberately narrow. The file must be markdown with frontmatter that includes a `description:`. It must sit in a part of the register your organisation writes, it must carry provenance and evidence for what the reviewer saw, and a person must have elected it. `apply --write --register estate` creates the file and adds the line to the estate audit log in one write. Targets in a plugin cache are refused.
 
-This is how something the team has learned becomes something agents do, with a person's approval and a record at every step. The lesson is drafted as a proposal, a person elects it, the Clerk creates the skill, agent or command, and the audit log records that it happened. The bundle holds what the team believes, and the procedure estate holds what agents are allowed to do with it.
+This is how something the team has learned becomes something agents do, with a person's approval and a record at every step. The lesson is drafted as a proposal, a person elects it, the Clerk creates the skill, agent or command, and the audit log records that it happened. The bundle records what the team believes. Promotion turns one of those beliefs into a command, skill or agent that agents may use.
 
 ## Notion approval surface
 
@@ -96,7 +96,7 @@ For local use, copy `.env.example` to `.env` and fill in the keys. The CLI loads
   2. **Validator** (`validateDraft` in `src/ai/proposal.ts`, run by the single point that writes proposals). The validator, not the model, decides everything that carries authority, and the model's output only supplies the wording. The proposal id must be the deterministic `P-<hash>`, so a model cannot choose which file it is written to. The kind must be one the drafting agent is allowed to produce, and no agent may draft `new-procedure`. `needs-human` is set to `true` for every agent except the gap-miner, whose value is set in code. The target must be a plain relative path that stays inside the bundle or estate root after symlinks are resolved. Single-line fields (summary, journal line, index entry, patch values, evidence file names) may not contain a newline or a control character. No model text may contain a decision checkbox line or a reserved draft heading (`### Journal line` and the like), and prose and drafted bodies may not contain a code fence, because any of these would let the model forge an election or a draft block. Each refusal is logged against the cluster with its reason. Agents build drafts from named fields and never by spreading the model's reply, so an extra `id` or `target` key in the reply is ignored.
 
   Every value written into the proposal's YAML frontmatter goes through `yamlScalar` or `yamlListItem`. A value with a newline or a YAML-significant character is double-quoted with JSON escapes so that it stays on one line. A value starting `---` is refused, and so is any list item the reader cannot represent. No model string is passed to a shell, used as a URL, or used as a path outside the root.
-  3. **Apply plan confinement.** The Clerk checks every proposal file again, whatever produced it. It refuses an amend or new-procedure proposal without `needs-human`, a target outside the root, a reviewed-surface hash that no longer matches, and any planned write that would land outside the loaded root.
+  3. **Apply plan confinement.** The Clerk checks every proposal file again, whatever produced it. It refuses an amend or new-procedure proposal without `needs-human`, a target outside the root, a hash of the reviewed files that no longer matches, and any planned write that would land outside the loaded root.
   4. **Human election.** Nothing is applied until a named person elects the proposal. The worst a poisoned note can do is produce a plausible-looking draft, which the reviewer then declines.
 
   `tests/ai-injection.test.ts` runs a stubbed model that obeys an injected instruction, and shows layers 2 and 3 refusing what it produces.

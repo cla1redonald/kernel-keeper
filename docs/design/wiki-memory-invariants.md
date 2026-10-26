@@ -110,7 +110,7 @@ bundle/
 
 Source files are evidence, and need not be concepts. The patrol should be able to tell a file that is missing from the index from one that was never meant to be in it.
 
-### Derived Artifacts
+### Derived Artefacts
 
 Generated files should say they are generated and where they come from:
 
@@ -250,7 +250,7 @@ Extend `kernel-keeper drift` job construction:
 - Include receipt paths in proposal evidence.
 - Label proposals with relevant checks, for example `checks: [semantic-drift, claim-receipts]` when drift arises from sourced claims.
 
-### Phase 7: Derived Artifact Integrity
+### Phase 7: Derived Artefact Integrity
 
 Add checks that keep source and cache apart:
 

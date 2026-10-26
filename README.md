@@ -51,7 +51,7 @@ You need Node 22 or later.
    node dist/cli.js glass-demo
    ```
 
-Step 3 exits with code `1`, because the fixture has one medium finding. This is what it printed when it was run on 2026-10-11.
+Step 3 exits with code `1`, because the fixture has at least one medium finding. The fixture's dates are fixed, so more pages fall past the 90-day window as time goes on. This is what it printed when it was run on 2026-10-11.
 
 ```markdown
 # Patrol report: bundle

@@ -38,8 +38,8 @@ You have to switch these checks on. [memory-doctrine.md](memory-doctrine.md) exp
 
 | Check | Severity | What it catches |
 |---|---|---|
-| `index-line-quality` | MED/LOW | Indexed concept links that give too little nearby context for index-first retrieval. |
-| `claim-receipts` | MED/LOW | Explicit `[source: ...]` receipts that are missing, outside the loaded surface, or point at binary or media files. |
+| `index-line-quality` | MED/LOW | Indexed concept links that give too little nearby context for an agent reading the index first. |
+| `claim-receipts` | MED/LOW | Explicit `[source: ...]` receipts that are missing, outside the files the patrol loaded, or point at binary or media files. |
 | `dated-overview` | MED | Invalid or future-dated `As of YYYY-MM-DD` overview markers in concept prose. Missing markers stay quiet. |
 | `derived-artifacts` | MED | Generated or cache-like concept files that do not declare resolvable `generated-from:` provenance. |
 | `archive-lifecycle` | MED/LOW | `status: archived` items without an `archive-note:`, and `archive/` paths that are not lifecycle-marked. |
@@ -69,7 +69,7 @@ Discovery only reports a folder if it holds register items that you wrote and th
 
 | Check | Severity | What it catches |
 |---|---|---|
-| `agent-visibility` | HIGH/MED | An agent `.md` with no frontmatter (invisible to the agent registry, with nothing to tell you), a missing description, or a filename that differs from the declared `name`. |
+| `agent-visibility` | HIGH/MED | An agent `.md` with no frontmatter (the agent registry ignores it without saying so), a missing description, or a filename that differs from the declared `name`. |
 | `skill-shape` | HIGH/MED/LOW | A skill folder without `SKILL.md` (cannot be invoked; LOW rather than HIGH for a plugin's skill), or missing frontmatter or description (undiscoverable, authored skills only). |
 | `deprecated-tools` | HIGH | Mentions of tool names on your denylist (`--denylist`, one per line), such as retired MCP endpoints that would make a skill fail partway through a run. Skipped without comment when no denylist is given. |
 | `dangling-refs` | MED | Paths the item references (`~/...`, `$HOME/...`, relative links) that do not exist. Prose only: references inside code fences and inline code are treated as examples. MED because a missing path can be a runtime artefact the item legitimately describes. |

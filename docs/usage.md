@@ -16,7 +16,7 @@ node dist/cli.js . --memory                 # opt into the wiki-memory checks
 node dist/cli.js ~/.claude --register estate # skills, agents, commands and plugins
 ```
 
-The exit codes and every flag are listed in [checks.md](checks.md).
+[checks.md](checks.md) lists the exit codes and the main flags, and `--help` lists the rest.
 
 ## Snapshot and verify
 

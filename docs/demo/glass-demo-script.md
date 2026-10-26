@@ -15,7 +15,7 @@ Open the `glass-demo:` URL that it prints.
 
 1. Open **Review Queue**. Glass is scanning exactly the same files and running the same checks as the CLI.
 2. Open **Proposals** and select `P-northwind-promote-command`.
-3. Point out the promotion card. It shows something the team keeps relearning being turned into a command that agents will follow. The truth register holds what the team believes. The procedure estate holds what agents are allowed to do. A promotion moves a lesson from the first into the second.
+3. Point out the promotion card. Explain that the bundle is where the team writes down what it believes, and that promoting a lesson turns it into a command agents are allowed to run.
 4. Click **Approve**.
 5. Open **Apply** and look through the diff. It is worked out by plain code, so it will be the same every time.
 6. Click **Apply Approved**.
